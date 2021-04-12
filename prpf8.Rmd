@@ -1,0 +1,60 @@
+---
+title: "Prpf8"
+output: html_notebook
+---
+
+```{r setup}
+library(tidyverse)
+theme_set(cowplot::theme_cowplot())
+devtools::load_all()
+```
+
+```{r}
+f <- here::here("private_data/qPCR/qPCR Prpf8 d17 4w final.xlsx")
+litter_sheet <- "Litter "
+litters <- read_all_litters(f, litter_sheet, c("A2:I10", "A13:I18", "A21:I28", "K2:S8","K11:S21","K24:S34"))
+```
+
+```{r}
+a1 <- read_qpcr(f, "qPCR set a1", range = "A5:AR31")
+a2 <- read_qpcr(f, "qPCR set a2", range = "A5:Z22")
+a3 <- read_qpcr(f, "qPCR set a3", range = "A5:AU22")
+a4 <- read_qpcr(f, "qPCR set a4", range = "A5:AC56")
+
+qpcr_d17 <- rbind(a1,a2,a3,a4)
+
+```
+
+```{r}
+housekeeping <- c("Ubb", "Gapdh", "Actb") 
+
+qpcr_d17 %>% filter(primer %in% housekeeping) %>%
+  ggplot(aes(x = ct)) + geom_histogram(binwidth = 0.2) + facet_grid(genotype ~ primer, scales = "free")
+```
+```{r}
+qpcr_d17 %>% filter(primer %in% housekeeping) %>%
+  ggplot(aes(y = ct, x = genotype)) + geom_boxplot() + 
+  geom_point(position = position_jitter(width = 0.25), alpha = 0.5) + 
+  facet_wrap( ~ primer, scales = "free")
+
+```
+
+
+```{r, fig.width=10, fig.height=6}
+to_compare <- setdiff(unique(qpcr_d17$primer), housekeeping)
+step_size <- 6
+for(step in 1:ceiling(length(interesting) / step_size)) {
+  primers_to_show <- interesting[((step - 1) * step_size + 1):(step * step_size)]
+  # print(qpcr_d17 %>% filter(primer %in% primers_to_show) %>%
+  #   ggplot(aes(x = ct)) + geom_histogram(binwidth = 0.2) + facet_grid(genotype ~ primer, scales = "free_y")
+  # )
+  print(qpcr_d17 %>% filter(primer %in% primers_to_show) %>%
+    ggplot(aes(y = ct, x = genotype)) + geom_boxplot() + 
+    geom_point(position = position_jitter(width = 0.25), alpha = 0.5) + 
+    facet_wrap( ~ primer_short, scales = "free")
+  )
+
+}
+
+```
+
