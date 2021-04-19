@@ -5,6 +5,11 @@ output: html_notebook
 
 ```{r setup}
 library(tidyverse)
+library(bayesplot)
+library(tidybayes)
+library(ggdist)
+library(brms)
+options(mc.cores = 4, brms.backend = "cmdstanr")
 theme_set(cowplot::theme_cowplot())
 devtools::load_all()
 ```
@@ -29,32 +34,213 @@ qpcr_d17 <- rbind(a1,a2,a3,a4)
 housekeeping <- c("Ubb", "Gapdh", "Actb") 
 
 qpcr_d17 %>% filter(primer %in% housekeeping) %>%
-  ggplot(aes(x = ct)) + geom_histogram(binwidth = 0.2) + facet_grid(genotype ~ primer, scales = "free")
+  ggplot(aes(x = Cq)) + geom_histogram(binwidth = 0.2) + facet_grid(genotype ~ primer, scales = "free")
 ```
 ```{r}
 qpcr_d17 %>% filter(primer %in% housekeeping) %>%
-  ggplot(aes(y = ct, x = genotype)) + geom_boxplot() + 
-  geom_point(position = position_jitter(width = 0.25), alpha = 0.5) + 
+  ggplot(aes(y = Cq, x = genotype)) + geom_boxplot(outlier.shape = NA) + 
+  geom_point(aes(color = sex, shape = sex), position = position_jitter(width = 0.25), alpha = 0.7) + 
   facet_wrap( ~ primer, scales = "free")
 
 ```
+
+```{r}
+qpcr_d17 %>% filter(primer %in% housekeeping) %>%
+  group_by(animal_plate, genotype, primer_short, sex) %>%
+  summarise(Cq = mean(Cq), .groups = "drop") %>%
+  ggplot(aes(y = Cq, x = primer_short, color = sex, group = animal_plate)) + 
+  geom_line(alpha = 0.7) + 
+  facet_wrap( ~ genotype, scales = "free")
+
+```
+
 
 
 ```{r, fig.width=10, fig.height=6}
 to_compare <- setdiff(unique(qpcr_d17$primer), housekeeping)
 step_size <- 6
-for(step in 1:ceiling(length(interesting) / step_size)) {
-  primers_to_show <- interesting[((step - 1) * step_size + 1):(step * step_size)]
+for(step in 1:ceiling(length(to_compare) / step_size)) {
+  primers_to_show <- to_compare[((step - 1) * step_size + 1):(step * step_size)]
   # print(qpcr_d17 %>% filter(primer %in% primers_to_show) %>%
   #   ggplot(aes(x = ct)) + geom_histogram(binwidth = 0.2) + facet_grid(genotype ~ primer, scales = "free_y")
   # )
   print(qpcr_d17 %>% filter(primer %in% primers_to_show) %>%
-    ggplot(aes(y = ct, x = genotype)) + geom_boxplot() + 
-    geom_point(position = position_jitter(width = 0.25), alpha = 0.5) + 
-    facet_wrap( ~ primer_short, scales = "free")
+    ggplot(aes(y = Cq, x = genotype)) + geom_boxplot(outlier.shape = NA) + 
+  geom_point(aes(color = sex, shape = sex), position = position_jitter(width = 0.25), alpha = 0.7) + 
+  facet_wrap( ~ primer_short, scales = "free")
   )
 
 }
 
 ```
+```{r}
+qpcr_d17 %>% group_by(primer_short, sex) %>% summarise(count = n()) %>% arrange(count)
+```
 
+
+```{r}
+#qpcr_d17_model <- qpcr_d17 
+ qpcr_d17_model <- qpcr_d17 %>% mutate(primer_short = factor(primer_short),
+                                       sex = factor(sex))
+
+priors = c(prior(normal(0,1), class = "sd"),
+           prior(normal(0,2), class = "b"))
+
+# fit1 <- brm(Cq ~ primer_short * mo(genotype_ord) + (1 || run) + (primer_short || sex + animal_no + litter + animal_plate + animal_replicate), data = qpcr_d17, prior = priors)
+fit1 <- brm(
+  bf(Cq ~ primer_short * genotype + sex*primer_short + (1 || run + animal_no + animal_no:primer_short + litter:primer_short),
+     sigma ~ (1 || primer_short + run)
+     ), 
+  data = qpcr_d17_model, 
+  prior = priors, refresh = 100,
+  file = here::here("local_temp_data/fit1_all"), file_refit = "on_change")
+fit1
+```
+```{r}
+
+nuts_params(fit1) %>% filter(Parameter == "treedepth__") %>% group_by(Value) %>% summarise(n())
+
+```
+
+
+```{r}
+pred_fit1 <- posterior_predict(fit1, cores = 1)
+```
+
+```{r}
+ppc_stat_grouped(qpcr_d17_model$Cq, pred_fit1, group = qpcr_d17_model$primer_short, stat = "sd")
+ppc_stat_grouped(qpcr_d17_model$Cq, pred_fit1, group = qpcr_d17_model$genotype_ord, stat = "sd")
+ppc_stat_grouped(qpcr_d17_model$Cq, pred_fit1, group = paste0(qpcr_d17_model$primer_short, qpcr_d17_model$genotype_ord), stat = "sd")
+ppc_stat_grouped(qpcr_d17_model$Cq, pred_fit1, group = paste0(qpcr_d17_model$primer_short, qpcr_d17_model$genotype_ord), stat = "mean")
+ppc_stat_grouped(qpcr_d17_model$Cq, pred_fit1, group = qpcr_d17_model$sex, stat = "sd")
+ppc_stat_grouped(qpcr_d17_model$Cq, pred_fit1, group = qpcr_d17_model$run, stat = "sd")
+ppc_stat_grouped(qpcr_d17_model$Cq, pred_fit1, group = qpcr_d17_model$run, stat = "mean")
+
+```
+
+```{r}
+qpcr_d17_model %>% group_by(primer_short) %>% summarise(mean = mean(Cq), sd  = sd(Cq)) %>%
+  arrange(mean)
+```
+TODO: Najít a reportovat bug s posterior_epred a mo
+
+```{r}
+comparisons <- data.frame(
+  numerator = factor(c("MR522/523", "MR512/513", "MR494/495"), levels = levels(qpcr_d17_model$primer_short)),
+  denominator = factor(c("MR523/524","MR515/516","MR492/493"), levels = levels(qpcr_d17_model$primer_short)),   
+  
+  eff_numerator = 1.8, eff_denominator = 1.8)  %>%
+  mutate(label = paste0(numerator, " : ", denominator), comparison_id = 1:n())
+
+# pred_data_numerator_wt <- qpcr_d17_model %>% filter(primer_short %in% comparisons$numerator, genotype_ord == "wt",
+#                                               sex == "F") %>% 
+#   group_by(primer_short) %>% top_n(1)  
+# 
+
+pred_data_numerator_wt <- data.frame(primer_short = comparisons$numerator,
+                                     genotype = "wt",
+                                     sex = "F"
+                                     )
+pred_data_numerator_d17 <- data.frame(primer_short = comparisons$numerator,
+                                     genotype = "d17",
+                                     sex = "F"
+                                     )
+pred_data_denominator_wt <- data.frame(primer_short = comparisons$denominator,
+                                     genotype = "wt",
+                                     sex = "F"
+                                     )
+pred_data_denominator_d17 <- data.frame(primer_short = comparisons$denominator,
+                                     genotype = "d17",
+                                     sex = "F"
+                                     )
+
+pred_numerator_wt <- posterior_epred(fit1, newdata = pred_data_numerator_wt, re_formula = NA, cores = 1)
+pred_numerator_d17 <- posterior_epred(fit1, newdata = pred_data_numerator_d17, re_formula = NA, cores = 1)
+pred_denominator_wt <- posterior_epred(fit1, newdata = pred_data_denominator_wt, re_formula = NA, cores = 1)
+pred_denominator_d17 <- posterior_epred(fit1, newdata = pred_data_denominator_d17, re_formula = NA, cores = 1)
+
+pred_numerator <- pred_numerator_wt - pred_numerator_d17 
+pred_denominator <- pred_denominator_wt - pred_denominator_d17 
+
+comparisons_pred_numerator <- tidybayes::add_draws(comparisons, pred_numerator, value = "pred_numerator")
+comparisons_pred_denominator <- tidybayes::add_draws(comparisons, pred_denominator, value = "pred_denominator")
+
+comparisons_pred <- comparisons_pred_numerator %>% 
+  inner_join(comparisons_pred_denominator, by = setdiff(names(comparisons_pred_numerator), "pred_numerator")) %>%
+  mutate(log_ratio = log(eff_numerator) * pred_numerator - log(eff_denominator) * pred_denominator)
+
+
+if(nrow(comparisons_pred) != nrow(comparisons_pred_numerator) || nrow(comparisons_pred) != nrow(comparisons_pred_denominator)) {
+  stop("Bad join")
+}
+
+```
+
+```{r}
+
+qpcr_d17_averaged <- qpcr_d17_model %>% 
+  group_by(genotype, primer_short) %>%
+  summarise(avg_Cq = mean(Cq), sd_Cq = sd(Cq), sem_Cq = sd_Cq / n(), .groups = "drop")
+
+qpcr_d17_averaged_comparisons <- comparisons %>%
+  inner_join(qpcr_d17_averaged, by = c("numerator" = "primer_short")) %>%
+  rename(numerator_avg_Cq = avg_Cq, numerator_sem_Cq = sem_Cq) %>%
+  inner_join(qpcr_d17_averaged, by = c("denominator" = "primer_short", "genotype")) %>%
+  rename(denominator_avg_Cq = avg_Cq, denominator_sem_Cq = sem_Cq) #%>%
+ # mutate(log_ratio = log(eff_numerator) * log(numerator_avg_Cq) - log(eff_denominator) * log(denominator_avg_Cq))
+
+comparisons_obs <- qpcr_d17_averaged_comparisons %>%
+  inner_join(qpcr_d17_averaged_comparisons, by = c("label", "comparison_id", "eff_numerator", "eff_denominator"), suffix = c("_d17","_wt")) %>%
+  filter(genotype_d17 == "d17", genotype_wt == "wt") %>%
+  mutate(log_ratio = log(eff_numerator) * (numerator_avg_Cq_wt - numerator_avg_Cq_d17) -  log(eff_denominator) * (denominator_avg_Cq_wt - denominator_avg_Cq_d17),
+         sem_ratio = log(eff_numerator) * (numerator_sem_Cq_wt + numerator_sem_Cq_d17) -  log(eff_denominator) * (denominator_sem_Cq_wt + denominator_sem_Cq_d17))
+
+
+comparisons_pred %>% ggplot(aes(x = label, y = log_ratio)) + 
+  geom_hline(yintercept = 0, color = "blue") + 
+  geom_point(data = comparisons_obs, position = position_nudge(x = 0.1), alpha = 0.8) +
+  geom_errorbar(data = comparisons_obs, aes(ymin = log_ratio - 1.96 * sem_ratio, ymax = log_ratio + 1.96 * sem_ratio), position = position_nudge(x = 0.1), alpha = 0.8, width = 0.05) +
+  stat_pointinterval() + 
+  scale_y_continuous("Log[ratio d17/ratio wt]")
+```
+```{r}
+qpcr_d17_replicate_averaged <- qpcr_d17_model %>%
+  group_by(run, animal_no, sex, genotype, primer_short) %>%
+  summarise(avg_Cq = mean(Cq), .groups = "drop")
+
+
+ratios_observed <- comparisons %>%
+  inner_join(qpcr_d17_replicate_averaged, by = c("numerator" = "primer_short")) %>%
+  inner_join(qpcr_d17_replicate_averaged, by = c("denominator" = "primer_short", "run", "animal_no", "sex", "genotype"), suffix = c("_num", "_denom")) %>%
+  mutate(Cq_denom_num = avg_Cq_denom - avg_Cq_num)
+ 
+ratios_observed %>%
+  ggplot(aes(x = genotype, y = Cq_denom_num)) + geom_boxplot(outlier.shape = NA) + geom_point(aes(color = sex, shape = sex), position = position_jitter(width = 0.3)) + facet_wrap(~label, scales = "free_y") + 
+  scale_y_continuous("Cq (denominator) - Cq (numerator)")
+```
+
+
+
+Steibel et al.: Mixed models, normal error https://www.sciencedirect.com/science/article/pii/S0888754309000986
+The same, but Poisson-LogNormal https://journals.plos.org/plosone/article?id=10.1371/journal.pone.0071448
+
+
+
+Below, assuming we have "noise free" $Cq$ values.
+
+The ratio of the products $a,b$ in sample $i$ is:
+
+$$
+v_i = \frac{E_a^{S_a - Cq_{a,i}}}{E_b^{S_b - Cq_{b,i}}}
+$$
+
+Where $E_a, E_b$ are the PCR efficiencies and $S_a, S_b$ - the cycle that would be reached when amplifying a single molecule (similarly an abstract "noise free" value).
+
+We are interested in 
+
+$$
+r = \frac{v_1}{v_2} \\
+\log{r} = \log v_1 - \log v_2 = \left(  (\log E_a)(S_a - Cq_{a,1}) - (\log E_b)(S_b - Cq_{b,1}) \right) - 
+\left(  (\log E_a)(S_a - Cq_{a,2}) - (\log E_b)(S_b - Cq_{b,2}) \right) = \\
+(\log E_a)(Cq_{a,2} - Cq_{a,1}) - (\log E_b)(Cq_{b,2}-Cq_{b,1})
+$$

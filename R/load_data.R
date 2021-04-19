@@ -48,21 +48,42 @@ primer_to_short <- function(x) {
 #' @importFrom tidyselect starts_with
 read_qpcr <- function(file, sheet, range) {
   qpcr <- readxl::read_excel(file, sheet = sheet, range = range, .name_repair = copy_merged_columns_name_repair)
-  qpcr <- dplyr::filter(qpcr, !is.na(`animal no.`))
+  qpcr <- dplyr::rename(qpcr,
+                        sex = gender,
+                        animal_no = `animal no.`,
+                        run = `qPCR run`)
+  qpcr <- dplyr::filter(qpcr, !is.na(animal_no))
   last_run <- NULL
   for(i in 1:nrow(qpcr)) {
-    if(!is.na(qpcr[["qPCR run"]][i])) {
-      last_run <- qpcr[["qPCR run"]][i]
+    if(!is.na(qpcr$run[i])) {
+      last_run <- qpcr$run[i]
     } else {
-      qpcr[["qPCR run"]][i] <- last_run
+      qpcr$run[i] <- last_run
     }
   }
+
+  duplicated_animals <- qpcr %>% group_by(run, animal_no) %>%
+    summarise(count = n(), .groups = "drop") %>%
+    filter(count > 1)
+
+  if(nrow(duplicated_animals) > 1) {
+    stop("Duplicated animals")
+  }
+
   qpcr_long <- tidyr::pivot_longer(qpcr,
                       c(starts_with("MR"), starts_with("Ubb"), starts_with("Gapdh"), starts_with("Actb")),
-                      names_to = c("primer", "replicate"), names_sep = "___", values_to = "ct")
+                      names_to = c("primer", "replicate"), names_sep = "___", values_to = "Cq")
 
-  qpcr_long <- dplyr::filter(qpcr_long, !is.na(ct), ct > 0)
-  qpcr_long <- dplyr::mutate(qpcr_long, primer_short = primer_to_short(primer))
+  qpcr_long <- dplyr::filter(qpcr_long, !is.na(Cq), Cq > 0)
+  qpcr_long <- dplyr::mutate(qpcr_long,
+                             primer_short = primer_to_short(primer),
+                             genotype_ord = factor(genotype, levels = c("wt/wt", "d17/wt", "d17/d17"),
+                                                   labels = c("wt", "het", "d17"), ordered = TRUE),
+                             genotype = factor(genotype, levels = c("wt/wt", "d17/wt", "d17/d17"), ,
+                                               labels = c("wt", "het", "d17")),
+                             animal_plate = interaction(animal_no, run),
+                             animal_replicate = interaction(animal_plate, replicate)
+                             )
 
   qpcr_long
 }
