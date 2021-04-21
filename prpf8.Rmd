@@ -31,12 +31,14 @@ if(document_output) {
   table_format <- function(x, caption = NULL, align = NULL) { x }
 }
 
+housekeeping <- c("Ubb", "Gapdh", "Actb") 
+
 ```
+
+# d17 4w
 
 ```{r}
 f <- here::here("private_data/qPCR/qPCR Prpf8 d17 4w final.xlsx")
-litter_sheet <- "Litter "
-litters <- read_all_litters(f, litter_sheet, c("A2:I10", "A13:I18", "A21:I28", "K2:S8","K11:S21","K24:S34"))
 ```
 
 ```{r}
@@ -45,123 +47,78 @@ a2 <- read_qpcr(f, "qPCR set a2", range = "A5:Z22")
 a3 <- read_qpcr(f, "qPCR set a3", range = "A5:AU22")
 a4 <- read_qpcr(f, "qPCR set a4", range = "A5:AC56")
 
-qpcr_d17 <- rbind(a1,a2,a3,a4)
-
+d17_4w <- rbind(a1, a2, a3, a4)
 ```
 
-# Exploratory plots
+## Exploratory plots
 
 
-```{r hist-housekeeping, fig.cap = "Histogram of Cq numbers for the three housekeeping genes used. Gapdh seems to be the most consistent. wt/d17 - wildtype/d17 homozygotes, het - heterozygotes"}
-housekeeping <- c("Ubb", "Gapdh", "Actb") 
-
-qpcr_d17 %>% filter(primer %in% housekeeping) %>%
-  ggplot(aes(x = Cq)) + geom_histogram(binwidth = 0.2) + facet_grid(genotype ~ primer, scales = "free")
+```{r d17-4w-box-housekeeping, fig.cap = "Cq values of the housekeeping genes stratified by genotype and sex. Each dot is a single technical replicate."}
+genes_boxplot(d17_4w, housekeeping)
 ```
 
 
-```{r box-housekeeping, fig.cap = "Cq values of the housekeeping genes stratified by genotype and sex. Each dot is a single technical replicate."}
-qpcr_d17 %>% filter(primer %in% housekeeping) %>%
-  ggplot(aes(y = Cq, x = genotype)) + geom_boxplot(outlier.shape = NA) + 
-  geom_point(aes(color = sex, shape = sex), position = position_jitter(width = 0.25), alpha = 0.7) + 
-  facet_wrap( ~ primer, scales = "free")
-
-```
-
-
-```{r parcoord-housekeeping, fig.cap = "Average Cq number across technical replicates for the housekeeping genes in each biological replicate. Each line connects measurements from the same biological replicate."}
-qpcr_d17 %>% filter(primer %in% housekeeping) %>%
-  group_by(animal_plate, genotype, primer_short, sex) %>%
-  summarise(Cq = mean(Cq), .groups = "drop") %>%
-  ggplot(aes(y = Cq, x = primer_short, color = sex, group = animal_plate)) + 
-  geom_line(alpha = 0.7) + 
-  facet_wrap( ~ genotype, scales = "free")
-
+```{r d17-rw-parcoord-housekeeping, fig.cap = "Average Cq number across technical replicates for the housekeeping genes in each biological replicate. Each line connects measurements from the same biological replicate."}
+genes_parcoord(d17_4w, housekeeping)
 ```
 
 
 The set of plots below shows Cq numbers for all the measured primers stratified by sex and genotype. Each dot is a single technical replicate.
 
 ```{r, fig.width=10, fig.height=6}
-to_compare <- setdiff(unique(qpcr_d17$primer), housekeeping)
-step_size <- 6
-for(step in 1:ceiling(length(to_compare) / step_size)) {
-  primers_to_show <- to_compare[((step - 1) * step_size + 1):(step * step_size)]
-  # print(qpcr_d17 %>% filter(primer %in% primers_to_show) %>%
-  #   ggplot(aes(x = ct)) + geom_histogram(binwidth = 0.2) + facet_grid(genotype ~ primer, scales = "free_y")
-  # )
-  print(qpcr_d17 %>% filter(primer %in% primers_to_show) %>%
-    ggplot(aes(y = Cq, x = genotype)) + geom_boxplot(outlier.shape = NA) + 
-  geom_point(aes(color = sex, shape = sex), position = position_jitter(width = 0.25), alpha = 0.7) + 
-  facet_wrap( ~ primer_short, scales = "free")
-  )
-
-}
-
+to_compare <- setdiff(unique(d17_4w$primer_short), housekeeping)
+genes_boxplot(d17_4w, to_compare, step_size = 8)
 ```
 
-# Fitting the model
+## Fitting the model
 
 ```{r}
-#qpcr_d17_model <- qpcr_d17 
- qpcr_d17_model <- qpcr_d17 %>% mutate(primer_short = factor(primer_short),
-                                       sex = factor(sex))
+#d17_4w_model <- d17_4w 
+ d17_4w_model <- d17_4w %>% data_for_model()
 
-priors = c(prior(normal(0,1), class = "sd"),
-           prior(normal(0,2), class = "b"))
 
-# fit1 <- brm(Cq ~ primer_short * mo(genotype_ord) + (1 || run) + (primer_short || sex + animal_no + litter + animal_plate + animal_replicate), data = qpcr_d17, prior = priors)
-fit1 <- brm(
-  bf(Cq ~ primer_short * genotype + sex*primer_short + (1 || run + animal_no + animal_no:primer_short + litter:primer_short),
-     sigma ~ (1 || primer_short + run)
-     ), 
-  data = qpcr_d17_model, 
-  prior = priors, refresh = 100,
-  file = here::here("local_temp_data/fit1_all"), file_refit = "on_change")
-fit1
+fit_d17_4w <- fit_model(d17_4w_model, "d17_4w")
+fit_d17_4w
 ```
 
-```{r}
-pred_fit1 <- posterior_predict(fit1, cores = 1)
-```
 
 Posterior predictive checks to asses model fit.
 
 ```{r}
-ppc_stat_grouped(qpcr_d17_model$Cq, pred_fit1, group = qpcr_d17_model$primer_short, stat = "sd")
-ppc_stat_grouped(qpcr_d17_model$Cq, pred_fit1, group = qpcr_d17_model$genotype_ord, stat = "sd")
-ppc_stat_grouped(qpcr_d17_model$Cq, pred_fit1, group = paste0(qpcr_d17_model$primer_short, qpcr_d17_model$genotype_ord), stat = "sd")
-ppc_stat_grouped(qpcr_d17_model$Cq, pred_fit1, group = paste0(qpcr_d17_model$primer_short, qpcr_d17_model$genotype_ord), stat = "mean")
-ppc_stat_grouped(qpcr_d17_model$Cq, pred_fit1, group = qpcr_d17_model$sex, stat = "sd")
-ppc_stat_grouped(qpcr_d17_model$Cq, pred_fit1, group = qpcr_d17_model$run, stat = "sd")
-ppc_stat_grouped(qpcr_d17_model$Cq, pred_fit1, group = qpcr_d17_model$run, stat = "mean")
-
+show_pp_checks(d17_4w_model, fit_d17_4w)
 ```
 
-# Comparisons
+## Comparisons
 
 The basic quantity of interest are the ratios of two products, we treat one product as numerator and one as denominator. When detecting circRNAs we take the numerator to be the primer that should be specific to the circRNA and denominator as the primer that should correspond to the linear form, i.e. the larger ratio for circRNA, the higher proportion of the products are circRNA. For detecting alternative exons, we take the primer including the alternative exons as the numerator, i.e. the the larger ratio for alternative exon, the more products contain the alternative exon. 
 
 Those are the ratios products we use:
 
 ```{r}
-comparisons <- readxl::read_excel(here::here("private_data/qPCR/qPCR selected amplicons.xlsx"), sheet = "qPCR amplicons to be compared", range = "T2:W40") %>% filter(!is.na(label)) %>%
-  mutate(numerator = primer_to_short(numerator)) %>%
-  pivot_longer(cols = starts_with("denominator"), names_to = "variant", names_prefix = "denominator_",
-               values_to = "denominator") %>%
-  mutate(denominator = primer_to_short(denominator)) %>%
-  filter(!is.na(denominator)) %>%
-  group_by(label) %>%
-  mutate(label_variant = if_else(rep(n() > 1, n()), paste0(label, " - ", variant), label)) %>%
-  ungroup()
+comparisons <-  readxl::read_excel(here::here("private_data/qPCR/qPCR selected amplicons.xlsx"), sheet = "qPCR amplicons to be compared", range = "T2:W40") %>% filter(!is.na(label)) %>%
+    mutate(numerator = primer_to_short(numerator)) %>%
+    pivot_longer(cols = starts_with("denominator"), names_to = "variant", names_prefix = "denominator_",
+                 values_to = "denominator") %>%
+    mutate(denominator = primer_to_short(denominator)) %>%
+    filter(!is.na(denominator)) %>%
+    group_by(label) %>%
+    mutate(label_variant = if_else(rep(n() > 1, n()), paste0(label, " - ", variant), label)) %>%
+    ungroup()
 
-comparisons <- comparisons %>% 
-  mutate(denominator = factor(denominator, levels = levels(qpcr_d17_model$primer_short)),
-         numerator = factor(numerator, levels = levels(qpcr_d17_model$primer_short)))
+  comparisons <- comparisons %>%
+    mutate(denominator = factor(denominator, levels = levels(d17_4w_model$primer_short)),
+           numerator = factor(numerator, levels = levels(d17_4w_model$primer_short)))
 
-if(any(is.na(comparisons$numerator)) || any(is.na(comparisons$denominator))) {
-  stop("Bad factor levels")
-}
+  if(any(is.na(comparisons$numerator)) || any(is.na(comparisons$denominator))) {
+    stop("Bad factor levels")
+  }
+
+  
+eff_variants <- data.frame(eff_numerator = c(1.5, 1.8, 2), eff_denominator = c(2, 1.8, 1.5), eff_label = factor(1:3, labels = c("Favor denom", "Neutral", "Favor num")))
+
+comparisons_eff <- comparisons %>%
+  crossing(eff_variants) %>%
+  mutate(comparison_id = 1:n())
 
 comparisons %>% select(label, variant, numerator, denominator) %>% table_format()
 
@@ -169,71 +126,23 @@ comparisons %>% select(label, variant, numerator, denominator) %>% table_format(
 
 
 ```{r}
-eff_variants <- data.frame(eff_numerator = c(1.5, 1.8, 2), eff_denominator = c(2, 1.8, 1.5), eff_label = factor(1:3, labels = c("Favor denom", "Neutral", "Favor num")))
-
-comparisons_eff <- comparisons %>%
-  crossing(eff_variants) %>%
-  mutate(comparison_id = 1:n())
-
-# pred_data_numerator_wt <- qpcr_d17_model %>% filter(primer_short %in% comparisons$numerator, genotype_ord == "wt",
-#                                               sex == "F") %>% 
-#   group_by(primer_short) %>% top_n(1)  
-# 
-
-pred_data_numerator_wt <- data.frame(primer_short = comparisons_eff$numerator,
-                                     genotype = "wt",
-                                     sex = "F"
-                                     )
-pred_data_numerator_d17 <- data.frame(primer_short = comparisons_eff$numerator,
-                                     genotype = "d17",
-                                     sex = "F"
-                                     )
-pred_data_denominator_wt <- data.frame(primer_short = comparisons_eff$denominator,
-                                     genotype = "wt",
-                                     sex = "F"
-                                     )
-pred_data_denominator_d17 <- data.frame(primer_short = comparisons_eff$denominator,
-                                     genotype = "d17",
-                                     sex = "F"
-                                     )
-
-pred_numerator_wt <- posterior_epred(fit1, newdata = pred_data_numerator_wt, re_formula = NA, cores = 1)
-pred_numerator_d17 <- posterior_epred(fit1, newdata = pred_data_numerator_d17, re_formula = NA, cores = 1)
-pred_denominator_wt <- posterior_epred(fit1, newdata = pred_data_denominator_wt, re_formula = NA, cores = 1)
-pred_denominator_d17 <- posterior_epred(fit1, newdata = pred_data_denominator_d17, re_formula = NA, cores = 1)
-
-pred_numerator <- pred_numerator_wt - pred_numerator_d17 
-pred_denominator <- pred_denominator_wt - pred_denominator_d17 
-
-comparisons_pred_numerator <- tidybayes::add_draws(comparisons_eff, pred_numerator, value = "pred_numerator")
-comparisons_pred_denominator <- tidybayes::add_draws(comparisons_eff, pred_denominator, value = "pred_denominator")
-
-comparisons_pred <- comparisons_pred_numerator %>% 
-  inner_join(comparisons_pred_denominator, by = setdiff(names(comparisons_pred_numerator), "pred_numerator")) %>%
-  mutate(log_ratio = log(eff_numerator) * pred_numerator - log(eff_denominator) * pred_denominator)
-
-
-if(nrow(comparisons_pred) != nrow(comparisons_pred_numerator) || nrow(comparisons_pred) != nrow(comparisons_pred_denominator)) {
-  stop("Bad join")
-}
-
+comparisons_pred <- predict_comparisons(fit_d17_4w, comparisons_eff)
 ```
 
 ```{r}
-
-qpcr_d17_averaged <- qpcr_d17_model %>% 
+d17_4w_averaged <- d17_4w_model %>% 
   group_by(genotype, primer_short) %>%
   summarise(avg_Cq = mean(Cq), sd_Cq = sd(Cq), sem_Cq = sd_Cq / n(), .groups = "drop")
 
-qpcr_d17_averaged_comparisons <- comparisons_eff %>%
-  inner_join(qpcr_d17_averaged, by = c("numerator" = "primer_short")) %>%
+d17_4w_averaged_comparisons <- comparisons_eff %>%
+  inner_join(d17_4w_averaged, by = c("numerator" = "primer_short")) %>%
   rename(numerator_avg_Cq = avg_Cq, numerator_sem_Cq = sem_Cq) %>%
-  inner_join(qpcr_d17_averaged, by = c("denominator" = "primer_short", "genotype")) %>%
+  inner_join(d17_4w_averaged, by = c("denominator" = "primer_short", "genotype")) %>%
   rename(denominator_avg_Cq = avg_Cq, denominator_sem_Cq = sem_Cq) #%>%
  # mutate(log_ratio = log(eff_numerator) * log(numerator_avg_Cq) - log(eff_denominator) * log(denominator_avg_Cq))
 
-comparisons_obs <- qpcr_d17_averaged_comparisons %>%
-  inner_join(qpcr_d17_averaged_comparisons, by = c("label", "comparison_id", "eff_numerator", "eff_denominator", "eff_label"), suffix = c("_d17","_wt")) %>%
+comparisons_obs <- d17_4w_averaged_comparisons %>%
+  inner_join(d17_4w_averaged_comparisons, by = c("label", "comparison_id", "eff_numerator", "eff_denominator", "eff_label"), suffix = c("_d17","_wt")) %>%
   filter(genotype_d17 == "d17", genotype_wt == "wt") %>%
   mutate(log_ratio = log(eff_numerator) * (numerator_avg_Cq_wt - numerator_avg_Cq_d17) -  log(eff_denominator) * (denominator_avg_Cq_wt - denominator_avg_Cq_d17),
          sem_ratio = log(eff_numerator) * (numerator_sem_Cq_wt + numerator_sem_Cq_d17) -  log(eff_denominator) * (denominator_sem_Cq_wt + denominator_sem_Cq_d17))
@@ -241,14 +150,14 @@ comparisons_obs <- qpcr_d17_averaged_comparisons %>%
 ```
 
 ```{r}
-qpcr_d17_replicate_averaged <- qpcr_d17_model %>%
+d17_4w_replicate_averaged <- d17_4w_model %>%
   group_by(run, animal_no, sex, genotype, primer_short) %>%
   summarise(avg_Cq = mean(Cq), .groups = "drop")
 
 
 ratios_observed <- comparisons %>% 
-  inner_join(qpcr_d17_replicate_averaged, by = c("numerator" = "primer_short")) %>%
-  inner_join(qpcr_d17_replicate_averaged, by = c("denominator" = "primer_short", "run", "animal_no", "sex", "genotype"), suffix = c("_num", "_denom")) %>%
+  inner_join(d17_4w_replicate_averaged, by = c("numerator" = "primer_short")) %>%
+  inner_join(d17_4w_replicate_averaged, by = c("denominator" = "primer_short", "run", "animal_no", "sex", "genotype"), suffix = c("_num", "_denom")) %>%
   mutate(Cq_denom_num = avg_Cq_denom - avg_Cq_num)
 
 ```
@@ -321,6 +230,90 @@ comparisons_pred %>%
   scale_y_log10("ratio d17/ratio wt") + scale_color_brewer(type = "qual") +
   comparison_label_theme
 ```
+
+# d17 8w
+
+
+```{r}
+f_d17_8w <- here::here("private_data/qPCR/qPCR Prpf8 d17 8w final.xlsx")
+d17_8w <- rbind(
+  read_qpcr(f_d17_8w, "qPCR set 1", range = "A5:BA22"),
+  read_qpcr(f_d17_8w, "qPCR set 2", range = "A5:BA22")
+)
+```
+
+
+```{r}
+genes_boxplot(d17_8w, housekeeping)
+```
+```{r}
+genes_boxplot(d17_8w, sort(setdiff(unique(d17_8w$primer_short), housekeeping)))
+```
+
+
+```{r}
+d17_8w_model <- data_for_model(d17_8w)
+fit_d17_8w <- fit_model(d17_8w_model,"d17_8w")
+```
+
+
+
+# N 4w
+
+
+```{r}
+f_N_4w <- here::here("private_data/qPCR/qPCR Prpf8 N 4w final.xlsx")
+N_4w <- rbind(
+  read_qpcr(f_N_4w, "qPCR set a1", range = "A5:AR31", mutation = "N"),
+  read_qpcr(f_N_4w, "qPCR set a2", range = "A5:Z22", mutation = "N"),
+  read_qpcr(f_N_4w, "qPCR set a3", range = "A5:AU22", mutation = "N"),
+  read_qpcr(f_N_4w, "qPCR set a4", range = "A6:T31", mutation = "N")
+)
+```
+
+
+```{r}
+genes_boxplot(N_4w, housekeeping)
+```
+```{r}
+genes_boxplot(N_4w, sort(setdiff(unique(N_4w$primer_short), housekeeping)))
+```
+
+
+```{r}
+N_4w_model <- data_for_model(N_4w)
+fit_N_4w <- fit_model(N_4w_model,"N_4w")
+```
+
+# N 12w
+
+
+```{r}
+f_N_12w <- here::here("private_data/qPCR/qPCR Prpf8 N 12w final.xlsx")
+N_12w <- rbind(
+  read_qpcr(f_N_12w, "qPCR set 1", range = "A5:BA31", mutation = "N"),
+  read_qpcr(f_N_12w, "qPCR set 2", range = "A5:BA31", mutation = "N")
+)
+```
+
+
+```{r}
+genes_boxplot(N_12w, housekeeping)
+```
+```{r}
+genes_parcoord(N_12w, housekeeping)
+```
+
+
+```{r}
+genes_boxplot(N_12w, sort(setdiff(unique(N_12w$primer_short), housekeeping)))
+```
+
+
+```{r}
+N_12w_model <- data_for_model(N_12w)
+fit_N_12w <- fit_model(N_12w_model,"N_12w")
+``` 
 
 # Mathematical model
 

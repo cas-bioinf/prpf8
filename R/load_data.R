@@ -46,7 +46,7 @@ primer_to_short <- function(x) {
 
 #' @export
 #' @importFrom tidyselect starts_with
-read_qpcr <- function(file, sheet, range) {
+read_qpcr <- function(file, sheet, range, mutation = "d17") {
   qpcr <- readxl::read_excel(file, sheet = sheet, range = range, .name_repair = copy_merged_columns_name_repair)
   qpcr <- dplyr::rename(qpcr,
                         sex = gender,
@@ -74,16 +74,20 @@ read_qpcr <- function(file, sheet, range) {
                       c(starts_with("MR"), starts_with("Ubb"), starts_with("Gapdh"), starts_with("Actb")),
                       names_to = c("primer", "replicate"), names_sep = "___", values_to = "Cq")
 
+  genotype_levels <- c("wt/wt", paste0(mutation, "/wt"), paste0(mutation,"/", mutation))
+  genotype_labels <- c("wt", "het", mutation)
+
   qpcr_long <- dplyr::filter(qpcr_long, !is.na(Cq), Cq > 0)
   qpcr_long <- dplyr::mutate(qpcr_long,
                              primer_short = primer_to_short(primer),
-                             genotype_ord = factor(genotype, levels = c("wt/wt", "d17/wt", "d17/d17"),
-                                                   labels = c("wt", "het", "d17"), ordered = TRUE),
-                             genotype = factor(genotype, levels = c("wt/wt", "d17/wt", "d17/d17"), ,
-                                               labels = c("wt", "het", "d17")),
+                             genotype_ord = factor(genotype, levels = genotype_levels,
+                                                   labels = genotype_labels, ordered = TRUE),
+                             genotype = factor(genotype, levels = genotype_levels,
+                                               labels = genotype_labels),
                              animal_plate = interaction(animal_no, run),
                              animal_replicate = interaction(animal_plate, replicate)
                              )
 
   qpcr_long
 }
+
