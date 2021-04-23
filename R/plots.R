@@ -22,4 +22,56 @@ genes_parcoord <- function(data, primers) {
     facet_wrap( ~ genotype, scales = "free")
 }
 
+comparison_label_theme <- theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.3), axis.title.x = element_blank())
 
+plot_detailed_comparisons <- function(comparisons, comparisons_pred, ratios_observed, n_to_show = 4) {
+  n_to_show <- 4
+
+  all_comparisons <- sort(unique(comparisons$label))
+
+  comparison_groups <- list()
+  comparison_groups[[1]] <- c()
+  for(comp in all_comparisons) {
+    variants <- comparisons %>% filter(label == comp) %>% pull(label_variant)
+    n_variants <- length(variants)
+    last <- length(comparison_groups)
+    if(last == 0 || length(comparison_groups[[last]]) + n_variants > n_to_show) {
+      comparison_groups[[last + 1]] <- variants
+    } else {
+      comparison_groups[[last]] <- c(comparison_groups[[last]], variants)
+    }
+  }
+
+
+
+  for(i in 1:length(comparison_groups)) {
+    comparisons_to_show <- comparison_groups[[i]]
+
+    nudge_width <- 0.2
+
+    plot_pred <- comparisons_pred %>%
+      filter(label_variant %in% comparisons_to_show, eff_label == "Neutral") %>%
+      ggplot(aes(x = label_variant, y = exp(log_ratio))) +
+      geom_hline(yintercept = 1, color = "blue") +
+      expand_limits(y = c(0.5, 2)) +
+      stat_pointinterval() +
+      scale_y_log10("ratio d17/ratio wt") + comparison_label_theme
+
+    plot_observed <- ratios_observed %>%
+      filter(label_variant %in% comparisons_to_show) %>%
+      ggplot(aes(x = genotype, y = Cq_denom_num)) + geom_boxplot(outlier.shape = NA) + geom_point(aes(color = sex, shape = sex), position = position_jitter(width = 0.3)) + facet_wrap(~label_variant, scales = "free_y", ncol = 2) +
+      scale_y_continuous("Cq (denominator) - Cq (numerator)")
+
+    print((plot_observed | plot_pred) + plot_layout(widths = c(2,1)))
+  }
+
+}
+
+plot_comparisons_sensitivity <- function(comparisons_pred) {
+  comparisons_pred %>%
+    ggplot(aes(x = label_variant, y = exp(log_ratio), color = eff_label)) +
+    geom_hline(yintercept = 1, color = "blue") +
+    stat_pointinterval(position = position_dodge(width = 0.5)) +
+    scale_y_log10("ratio d17/ratio wt") + scale_color_brewer(type = "qual") +
+    comparison_label_theme
+}

@@ -74,11 +74,26 @@ genes_boxplot(d17_4w, to_compare, step_size = 8)
 
 ```{r}
 #d17_4w_model <- d17_4w 
- d17_4w_model <- d17_4w %>% data_for_model()
+ d17_4w_model <- data_for_model(d17_4w, housekeeping)
 
 
-fit_d17_4w <- fit_model(d17_4w_model, "d17_4w")
+priors = c(prior(normal(0,2), class = "sd"),
+           prior(normal(0,8), class = "b"))
+
+fit_d17_4w <- brm(
+    bf(Cq ~ primer_short * genotype + sex*primer_short + (1 || run + animal_no + animal_no:primer_short + litter:primer_short),
+       sigma ~ (1 || primer_short + run)
+    ),
+    data = d17_4w_model,
+    control = list(max_treedepth = 11),
+    prior = priors, refresh = 500,
+    file = here::here("local_temp_data/fit_d17_4w"), file_refit = "on_change")
+
+
 fit_d17_4w
+
+nuts_params(fit_d17_4w) %>% filter(Parameter == "treedepth__") %>%
+  group_by(Value) %>% summarise(n())
 ```
 
 
@@ -126,41 +141,10 @@ comparisons %>% select(label, variant, numerator, denominator) %>% table_format(
 
 
 ```{r}
-comparisons_pred <- predict_comparisons(fit_d17_4w, comparisons_eff)
+comparisons_pred_d17_4w <- predict_comparisons_genotype(fit_d17_4w, comparisons_eff, "wt", "d17")
+ratios_observed_d17_4w <- compute_ratios_observed(d17_4w_model, comparisons)
 ```
 
-```{r}
-d17_4w_averaged <- d17_4w_model %>% 
-  group_by(genotype, primer_short) %>%
-  summarise(avg_Cq = mean(Cq), sd_Cq = sd(Cq), sem_Cq = sd_Cq / n(), .groups = "drop")
-
-d17_4w_averaged_comparisons <- comparisons_eff %>%
-  inner_join(d17_4w_averaged, by = c("numerator" = "primer_short")) %>%
-  rename(numerator_avg_Cq = avg_Cq, numerator_sem_Cq = sem_Cq) %>%
-  inner_join(d17_4w_averaged, by = c("denominator" = "primer_short", "genotype")) %>%
-  rename(denominator_avg_Cq = avg_Cq, denominator_sem_Cq = sem_Cq) #%>%
- # mutate(log_ratio = log(eff_numerator) * log(numerator_avg_Cq) - log(eff_denominator) * log(denominator_avg_Cq))
-
-comparisons_obs <- d17_4w_averaged_comparisons %>%
-  inner_join(d17_4w_averaged_comparisons, by = c("label", "comparison_id", "eff_numerator", "eff_denominator", "eff_label"), suffix = c("_d17","_wt")) %>%
-  filter(genotype_d17 == "d17", genotype_wt == "wt") %>%
-  mutate(log_ratio = log(eff_numerator) * (numerator_avg_Cq_wt - numerator_avg_Cq_d17) -  log(eff_denominator) * (denominator_avg_Cq_wt - denominator_avg_Cq_d17),
-         sem_ratio = log(eff_numerator) * (numerator_sem_Cq_wt + numerator_sem_Cq_d17) -  log(eff_denominator) * (denominator_sem_Cq_wt + denominator_sem_Cq_d17))
-
-```
-
-```{r}
-d17_4w_replicate_averaged <- d17_4w_model %>%
-  group_by(run, animal_no, sex, genotype, primer_short) %>%
-  summarise(avg_Cq = mean(Cq), .groups = "drop")
-
-
-ratios_observed <- comparisons %>% 
-  inner_join(d17_4w_replicate_averaged, by = c("numerator" = "primer_short")) %>%
-  inner_join(d17_4w_replicate_averaged, by = c("denominator" = "primer_short", "run", "animal_no", "sex", "genotype"), suffix = c("_num", "_denom")) %>%
-  mutate(Cq_denom_num = avg_Cq_denom - avg_Cq_num)
-
-```
 
 Below is a set of somewhat complex plots showing both A) the observed ratios of products within a biological sample for all of the comparisons modelled (left) and B) model-derived "ratios of ratios" between genotypes (right). 
 
@@ -169,66 +153,14 @@ Assuming equal PCR efficiency, the logarithm of ratios of two products can be ap
 Using the statistical model, we can further compute the ratios of those ratios between genotypes in a hypothetical "noise free" experiment, after accounting for various sources of biological and technical variation. In the right panel we show the posterior credible intervals (95% - thin, 50% - thick) and means (points) for the ratio of ratios. Here ratio of ratios > 1 means that the d17 mice have larger numerator/denominator ratio than the wt mice. (note the log scale on the vertical axis)
 
 ```{r}
-
-n_to_show <- 4
-
-all_comparisons <- sort(unique(comparisons$label))
-
-comparison_groups <- list()
-comparison_groups[[1]] <- c()
-for(comp in all_comparisons) {
-  variants <- comparisons %>% filter(label == comp) %>% pull(label_variant)
-  n_variants <- length(variants)
-  last <- length(comparison_groups)
-  if(last == 0 || length(comparison_groups[[last]]) + n_variants > n_to_show) {
-    comparison_groups[[last + 1]] <- variants
-  } else {
-    comparison_groups[[last]] <- c(comparison_groups[[last]], variants)
-  }
-}
-
-comparison_label_theme <- theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.3), axis.title.x = element_blank())
-
-
-for(i in 1:length(comparison_groups)) {
-  comparisons_to_show <- comparison_groups[[i]]
-  
-  # comparisons_obs_to_show <- comparisons_obs %>%
-  #   filter(label_variant %in% comparisons_to_show, eff_label == "Neutral")
-  
-  nudge_width <- 0.2
-  
-  plot_pred <- comparisons_pred %>% 
-    filter(label_variant %in% comparisons_to_show, eff_label == "Neutral") %>%
-    ggplot(aes(x = label_variant, y = exp(log_ratio))) + 
-    geom_hline(yintercept = 1, color = "blue") + 
-    # geom_point(data = comparisons_obs_to_show, position = position_nudge(x = nudge_width), alpha = 0.8) +
-    # geom_errorbar(data = comparisons_obs_to_show, aes(ymin = log_ratio - 1.96 * sem_ratio, ymax = log_ratio + 1.96 * sem_ratio), position = position_nudge(x = nudge_width), alpha = 0.8, width = nudge_width  / 2) +
-    expand_limits(y = c(0.5, 2)) +
-    stat_pointinterval() + 
-    scale_y_log10("ratio d17/ratio wt") + comparison_label_theme
-
-  plot_observed <- ratios_observed %>%
-    filter(label_variant %in% comparisons_to_show) %>%
-    ggplot(aes(x = genotype, y = Cq_denom_num)) + geom_boxplot(outlier.shape = NA) + geom_point(aes(color = sex, shape = sex), position = position_jitter(width = 0.3)) + facet_wrap(~label_variant, scales = "free_y", ncol = 2) + 
-    scale_y_continuous("Cq (denominator) - Cq (numerator)")
-
-  print((plot_observed | plot_pred) + plot_layout(widths = c(2,1)))
-}
-
-
+plot_detailed_comparisons(comparisons, comparisons_pred_d17_4w, ratios_observed_d17_4w)
 ```
 
 Computing the ratio of ratios requires us to guess a value for PCR efficiency. In the above plots we assumed both products have the same efficiency of 1.8. To check robustness, we take two additional cases - either the numerator or the denominator product have substantially larger efficiency - 1.5 vs 2.0. Many of the comparisons stay almost unaffected, but some do change the sign of the difference assuming different efficiency.
 
 ```{r}
+plot_comparisons_sensitivity(comparisons_pred_d17_4w)
 
-comparisons_pred %>% 
-  ggplot(aes(x = label_variant, y = exp(log_ratio), color = eff_label)) + 
-  geom_hline(yintercept = 1, color = "blue") + 
-  stat_pointinterval(position = position_dodge(width = 0.5)) + 
-  scale_y_log10("ratio d17/ratio wt") + scale_color_brewer(type = "qual") +
-  comparison_label_theme
 ```
 
 # d17 8w
@@ -250,12 +182,38 @@ genes_boxplot(d17_8w, housekeeping)
 genes_boxplot(d17_8w, sort(setdiff(unique(d17_8w$primer_short), housekeeping)))
 ```
 
+## Fitting the model
+
+Simpler model as we have very few runs includ . Including sex also makes the model diverge, as there are not enough data to inform all the parameters.
 
 ```{r}
-d17_8w_model <- data_for_model(d17_8w)
-fit_d17_8w <- fit_model(d17_8w_model,"d17_8w")
+d17_8w_model <- data_for_model(d17_8w, housekeeping) 
+
+fit_d17_8w <-   brm(
+    bf(Cq ~ primer_short * genotype + (1 || animal_no + animal_no:primer_short + litter:primer_short),
+       sigma ~ (1 || primer_short)
+    ),
+    data = d17_8w_model,
+    adapt_delta = 0.95,
+    prior = priors, refresh = 500,
+    file = here::here("local_temp_data/fit_d17_8w"), file_refit = "on_change")
+  
+fit_d17_8w
 ```
 
+However, looking at the PP checks for sex we see that the variability between sexes is already accounted for by the model as it includes a per-animal and primer varying intercept.
+
+```{r}
+show_pp_checks(d17_8w_model, fit_d17_8w)
+```
+
+
+## Comparisons
+
+```{r}
+comparisons_pred <- predict_comparisons(fit_d17_8w, comparisons_eff)
+ratios_observed <- compute_ratios_observed(d17_8w_model, comparisons)
+```
 
 
 # N 4w
@@ -279,11 +237,35 @@ genes_boxplot(N_4w, housekeeping)
 genes_boxplot(N_4w, sort(setdiff(unique(N_4w$primer_short), housekeeping)))
 ```
 
+## Fitting the model
 
 ```{r}
-N_4w_model <- data_for_model(N_4w)
-fit_N_4w <- fit_model(N_4w_model,"N_4w")
+N_4w_model <- data_for_model(N_4w, housekeeping)
+
+fit_N_4w <-   brm(
+    bf(Cq ~ primer_short * genotype + (1 || animal_no + animal_no:primer_short + litter:primer_short),
+       sigma ~ (1 || primer_short)
+    ),
+    data = N_4w_model,
+    adapt_delta = 0.95,
+    max_treedepth = 11,
+    prior = priors, refresh = 500,
+    file = here::here("local_temp_data/fit_N_4w"), file_refit = "on_change")
+  
+fit_N_4w
 ```
+
+```{r}
+show_pp_checks(N_4w_model, fit_N_4w)
+```
+
+## Comparisons
+
+```{r}
+comparisons_pred_N_4w <- predict_comparisons(fit_N_4w, comparisons_eff)
+ratios_observed_N_4w <- compute_ratios_observed(N_4w_model, comparisons)
+```
+
 
 # N 12w
 
@@ -309,11 +291,28 @@ genes_parcoord(N_12w, housekeeping)
 genes_boxplot(N_12w, sort(setdiff(unique(N_12w$primer_short), housekeeping)))
 ```
 
+## Fitting the model
 
 ```{r}
-N_12w_model <- data_for_model(N_12w)
-fit_N_12w <- fit_model(N_12w_model,"N_12w")
+N_12w_model <- data_for_model(N_12w, housekeeping)
+
+fit_N_12w <-   brm(
+    bf(Cq ~ primer_short * genotype + (1 || animal_no + animal_no:primer_short),
+       sigma ~ (1 || primer_short)
+       ),
+    data = N_12w_model,
+    control = list(max_treedepth = 11),
+    prior = priors, refresh = 500,
+    file = here::here("local_temp_data/fit_N_12w"), file_refit = "on_change")
+  
+fit_N_12w
 ``` 
+
+```{r}
+show_pp_checks(N_12w_model, fit_N_12w)
+```
+
+## Comparisons
 
 # Mathematical model
 
