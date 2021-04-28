@@ -24,8 +24,9 @@ genes_parcoord <- function(data, primers) {
 
 comparison_label_theme <- theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.3), axis.title.x = element_blank())
 
+scale_color_type <- scale_color_brewer(type = "qual")
+
 plot_detailed_comparisons <- function(comparisons, comparisons_pred, ratios_observed, n_to_show = 4) {
-  n_to_show <- 4
 
   all_comparisons <- sort(unique(comparisons$label))
 
@@ -51,11 +52,12 @@ plot_detailed_comparisons <- function(comparisons, comparisons_pred, ratios_obse
 
     plot_pred <- comparisons_pred %>%
       filter(label_variant %in% comparisons_to_show, eff_label == "Neutral") %>%
-      ggplot(aes(x = label_variant, y = exp(log_ratio))) +
+      ggplot(aes(x = label_variant, y = exp(log_ratio), color = genotypes, shape = genotypes)) +
       geom_hline(yintercept = 1, color = "blue") +
       expand_limits(y = c(0.5, 2)) +
-      stat_pointinterval() +
-      scale_y_log10("ratio d17/ratio wt") + comparison_label_theme
+      stat_pointinterval(position = position_dodge(width = 0.5)) +
+      scale_color_type +
+      scale_y_log10("ratio of ratios") + comparison_label_theme
 
     plot_observed <- ratios_observed %>%
       filter(label_variant %in% comparisons_to_show) %>%
@@ -64,14 +66,27 @@ plot_detailed_comparisons <- function(comparisons, comparisons_pred, ratios_obse
 
     print((plot_observed | plot_pred) + plot_layout(widths = c(2,1)))
   }
-
 }
 
-plot_comparisons_sensitivity <- function(comparisons_pred) {
+plot_all_comparisons <- function(comparisons_pred, expand = c(0.5,2)) {
+  comparisons_pred %>%
+    filter(eff_label == "Neutral") %>%
+    ggplot(aes(x = label_variant, y = exp(log_ratio), color = genotypes, shape = genotypes)) +
+    geom_hline(yintercept = 1, color = "blue") +
+    stat_pointinterval(position = position_dodge(width = 0.4)) +
+    expand_limits(y = expand) +
+    scale_y_log10("ratio of ratios") + scale_color_type +
+    comparison_label_theme
+}
+
+
+plot_comparisons_sensitivity <- function(comparisons_pred, ncol = 1, expand = c(0.5,2)) {
   comparisons_pred %>%
     ggplot(aes(x = label_variant, y = exp(log_ratio), color = eff_label)) +
     geom_hline(yintercept = 1, color = "blue") +
     stat_pointinterval(position = position_dodge(width = 0.5)) +
-    scale_y_log10("ratio d17/ratio wt") + scale_color_brewer(type = "qual") +
+    expand_limits(y = expand) +
+    scale_y_log10("ratio of ratios") + scale_color_type +
+    facet_wrap(~genotypes, ncol = ncol, scales = "free_x") +
     comparison_label_theme
 }

@@ -91,3 +91,48 @@ read_qpcr <- function(file, sheet, range, mutation = "d17") {
   qpcr_long
 }
 
+
+process_comparisons <- function(comparisons, data_model) {
+  comparisons <- dplyr::mutate(comparisons,
+                               dplyr::across(c(starts_with("numerator"), starts_with("denominator")), primer_to_short))
+
+
+  if("denominator_1" %in% names(comparisons)) {
+    comparisons <- tidyr::pivot_longer(comparisons,
+                cols = starts_with("denominator"),
+                names_to = "variant", names_prefix = "denominator_",
+                values_to = "denominator")
+  } else if("numerator_1" %in% names(comparisons)) {
+    comparisons <- tidyr::pivot_longer(comparisons,
+                 cols = starts_with("numerator"),
+                 names_to = "variant", names_prefix = "numerator_",
+                 values_to = "numerator")
+  }
+
+  comparisons <- dplyr::filter(comparisons, !is.na(numerator), !is.na(denominator))
+
+  comparisons <- dplyr::mutate(comparisons,
+                               has_data = numerator %in% levels(data_model$primer_short) & denominator %in% levels(data_model$primer_short))
+
+  no_data_comp <- unique(dplyr::filter(comparisons, !has_data)$label)
+  if(length(no_data_comp) > 0) {
+    message("The following comparisons have no data in this setting and will be ignored: \n\t",
+            paste0(no_data_comp, collapse ="\n\t"))
+  }
+
+  comparisons <- comparisons %>%
+    dplyr::filter(has_data) %>%
+    group_by(label) %>%
+    mutate(label_variant = if_else(rep(n() > 1, n()), paste0(label, " - ", variant), label)) %>%
+    ungroup()
+
+  comparisons <- comparisons %>%
+    mutate(denominator = factor(denominator, levels = levels(data_model$primer_short)),
+           numerator = factor(numerator, levels = levels(data_model$primer_short)))
+
+  if(any(is.na(comparisons$numerator)) || any(is.na(comparisons$denominator))) {
+    stop("Bad factor levels")
+  }
+
+  comparisons
+}

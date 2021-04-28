@@ -32,7 +32,7 @@ if(document_output) {
 }
 
 housekeeping <- c("Ubb", "Gapdh", "Actb") 
-
+pp_checks <- FALSE
 ```
 
 # d17 4w
@@ -100,49 +100,38 @@ nuts_params(fit_d17_4w) %>% filter(Parameter == "treedepth__") %>%
 Posterior predictive checks to asses model fit.
 
 ```{r}
-show_pp_checks(d17_4w_model, fit_d17_4w)
+if(pp_checks) {
+  show_pp_checks(d17_4w_model, fit_d17_4w)
+}
 ```
 
-## Comparisons
+## Comparisons - alternative forms
 
 The basic quantity of interest are the ratios of two products, we treat one product as numerator and one as denominator. When detecting circRNAs we take the numerator to be the primer that should be specific to the circRNA and denominator as the primer that should correspond to the linear form, i.e. the larger ratio for circRNA, the higher proportion of the products are circRNA. For detecting alternative exons, we take the primer including the alternative exons as the numerator, i.e. the the larger ratio for alternative exon, the more products contain the alternative exon. 
 
 Those are the ratios products we use:
 
 ```{r}
-comparisons <-  readxl::read_excel(here::here("private_data/qPCR/qPCR selected amplicons.xlsx"), sheet = "qPCR amplicons to be compared", range = "T2:W40") %>% filter(!is.na(label)) %>%
-    mutate(numerator = primer_to_short(numerator)) %>%
-    pivot_longer(cols = starts_with("denominator"), names_to = "variant", names_prefix = "denominator_",
-                 values_to = "denominator") %>%
-    mutate(denominator = primer_to_short(denominator)) %>%
-    filter(!is.na(denominator)) %>%
-    group_by(label) %>%
-    mutate(label_variant = if_else(rep(n() > 1, n()), paste0(label, " - ", variant), label)) %>%
-    ungroup()
+comparisons_raw <-  readxl::read_excel(here::here("private_data/qPCR/qPCR selected amplicons.xlsx"), sheet = "qPCR amplicons to be compared", range = "T2:W40") %>%
+  filter(!is.na(label))
 
-  comparisons <- comparisons %>%
-    mutate(denominator = factor(denominator, levels = levels(d17_4w_model$primer_short)),
-           numerator = factor(numerator, levels = levels(d17_4w_model$primer_short)))
-
-  if(any(is.na(comparisons$numerator)) || any(is.na(comparisons$denominator))) {
-    stop("Bad factor levels")
-  }
-
+comparisons_d17_4w <- comparisons_raw %>% 
+  process_comparisons(data_model = d17_4w_model)
   
 eff_variants <- data.frame(eff_numerator = c(1.5, 1.8, 2), eff_denominator = c(2, 1.8, 1.5), eff_label = factor(1:3, labels = c("Favor denom", "Neutral", "Favor num")))
 
-comparisons_eff <- comparisons %>%
+comparisons_d17_4w_eff <- comparisons_d17_4w %>%
   crossing(eff_variants) %>%
   mutate(comparison_id = 1:n())
 
-comparisons %>% select(label, variant, numerator, denominator) %>% table_format()
+comparisons_d17_4w %>% select(label, variant, numerator, denominator) %>% table_format()
 
 ```
 
 
 ```{r}
-comparisons_pred_d17_4w <- predict_comparisons_genotype(fit_d17_4w, comparisons_eff, "wt", "d17")
-ratios_observed_d17_4w <- compute_ratios_observed(d17_4w_model, comparisons)
+comparisons_pred_d17_4w <- predict_comparisons(fit_d17_4w, d17_4w, comparisons_d17_4w_eff, c("wt", "wt"), c( "het", "d17"))
+ratios_observed_d17_4w <- compute_ratios_observed(d17_4w_model, comparisons_d17_4w)
 ```
 
 
@@ -153,15 +142,91 @@ Assuming equal PCR efficiency, the logarithm of ratios of two products can be ap
 Using the statistical model, we can further compute the ratios of those ratios between genotypes in a hypothetical "noise free" experiment, after accounting for various sources of biological and technical variation. In the right panel we show the posterior credible intervals (95% - thin, 50% - thick) and means (points) for the ratio of ratios. Here ratio of ratios > 1 means that the d17 mice have larger numerator/denominator ratio than the wt mice. (note the log scale on the vertical axis)
 
 ```{r}
-plot_detailed_comparisons(comparisons, comparisons_pred_d17_4w, ratios_observed_d17_4w)
+plot_detailed_comparisons(comparisons_d17_4w, comparisons_pred_d17_4w, ratios_observed_d17_4w)
 ```
+
+
+```{r}
+plot_all_d17_4w <-  plot_all_comparisons(comparisons_pred_d17_4w)
+plot_all_d17_4w
+ggsave(here::here("local_temp_data/comparisons_d17_4w.svg"), plot = plot_all_d17_4w)
+
+```
+
 
 Computing the ratio of ratios requires us to guess a value for PCR efficiency. In the above plots we assumed both products have the same efficiency of 1.8. To check robustness, we take two additional cases - either the numerator or the denominator product have substantially larger efficiency - 1.5 vs 2.0. Many of the comparisons stay almost unaffected, but some do change the sign of the difference assuming different efficiency.
 
-```{r}
+```{r, fig.width=8, fig.height = 8}
 plot_comparisons_sensitivity(comparisons_pred_d17_4w)
+```
+
+```{r}
+summ_d17_4w <- summarise_comparisons(comparisons_pred_d17_4w)
+summ_d17_4w %>% table_format()
+```
+
+To highlight - the qualitative conclusions for the following comparisons are not robust to big differences in amplification efficiency.
+
+```{r}
+summ_d17_4w %>% 
+  filter(!robust) %>%
+  group_by(genotypes) %>%
+  summarise(non_robust_comparisons = paste0(label_variant, collapse = ", ")) %>% table_format()
+```
+
+
+
+## Comparisons - linear forms
+
+```{r}
+comparisons_lin_raw <- tibble::tribble(
+  ~label,           ~denominator, ~numerator_1, ~numerator_2,
+  "Rbfox1/Gapdh",  "Gapdh",   "MR513/514", "MR515/516", 
+  "Zfp521/Gapdh",  "Gapdh",   "MR518/519", "MR520/521",
+  "Chd7/Gapdh",    "Gapdh",   "MR523/524", "MR526/527"
+) 
+
+comparisons_lin_d17_4w <- process_comparisons(comparisons_lin_raw, d17_4w_model)
+
+comparisons_lin_d17_4w_eff <-  comparisons_lin_d17_4w %>%
+  crossing(eff_variants) %>%
+  mutate(comparison_id = 1:n())
+
+comparisons_lin_d17_4w %>% select(label, variant, numerator, denominator) %>% table_format()
 
 ```
+```{r}
+comparisons_lin_pred_d17_4w <- predict_comparisons(fit_d17_4w, d17_4w, comparisons_lin_d17_4w_eff, c("wt", "wt"), c( "het", "d17"))
+ratios_observed_d17_4w <- compute_ratios_observed(d17_4w_model, comparisons_lin_d17_4w)
+```
+
+
+```{r}
+plot_detailed_comparisons(comparisons_lin_d17_4w, comparisons_lin_pred_d17_4w, ratios_observed_d17_4w, n_to_show = 6)
+```
+
+
+```{r}
+plot_all_lin_d17_4w <- plot_all_comparisons(comparisons_lin_pred_d17_4w)
+plot_all_lin_d17_4w
+
+ggsave(here::here("local_temp_data/comparisons_lin_d17_4w.svg"), plot = plot_all_lin_d17_4w)
+```
+
+
+```{r}
+plot_comparisons_sensitivity(comparisons_lin_pred_d17_4w, ncol = 2)
+```
+
+```{r}
+summ_lin_d17_4w <- summarise_comparisons(comparisons_lin_pred_d17_4w)
+summ_lin_d17_4w
+
+min_change <- exp(-min(summ_lin_d17_4w$low))
+max_change <- exp(max(summ_lin_d17_4w$high))
+```
+For all of the linear comparisons, we can rule out more then `r min_change` fold decrease
+and more than `r max_change` fold increase in expression relative to Gapdh.
 
 # d17 8w
 
@@ -178,6 +243,7 @@ d17_8w <- rbind(
 ```{r}
 genes_boxplot(d17_8w, housekeeping)
 ```
+
 ```{r}
 genes_boxplot(d17_8w, sort(setdiff(unique(d17_8w$primer_short), housekeeping)))
 ```
@@ -204,17 +270,108 @@ fit_d17_8w
 However, looking at the PP checks for sex we see that the variability between sexes is already accounted for by the model as it includes a per-animal and primer varying intercept.
 
 ```{r}
-show_pp_checks(d17_8w_model, fit_d17_8w)
+if(pp_checks) {
+  show_pp_checks(d17_8w_model, fit_d17_8w)
+}
 ```
 
 
-## Comparisons
+## Comparisons - alternative forms
+
 
 ```{r}
-comparisons_pred <- predict_comparisons(fit_d17_8w, comparisons_eff)
-ratios_observed <- compute_ratios_observed(d17_8w_model, comparisons)
+comparisons_d17_8w <- comparisons_raw %>% 
+  process_comparisons(data_model = d17_8w_model)
+  
+
+comparisons_d17_8w_eff <- comparisons_d17_8w %>%
+  crossing(eff_variants) %>%
+  mutate(comparison_id = 1:n())
 ```
 
+
+```{r}
+comparisons_pred_d17_8w <- predict_comparisons(fit_d17_8w, d17_8w, comparisons_d17_8w_eff, c( "wt"), c("d17"))
+ratios_observed_d17_8w <- compute_ratios_observed(d17_8w_model, comparisons_d17_8w)
+```
+
+
+
+
+```{r}
+plot_detailed_comparisons(comparisons_d17_8w, comparisons_pred_d17_8w, ratios_observed_d17_8w)
+```
+
+
+```{r}
+plot_all_d17_8w <-  plot_all_comparisons(comparisons_pred_d17_8w)
+plot_all_d17_8w
+ggsave(here::here("local_temp_data/comparisons_d17_8w.svg"), plot = plot_all_d17_8w)
+
+```
+
+```{r, fig.width=8, fig.height = 8}
+plot_comparisons_sensitivity(comparisons_pred_d17_8w)
+```
+
+```{r}
+summ_d17_8w <- summarise_comparisons(comparisons_pred_d17_8w)
+summ_d17_8w %>% table_format()
+```
+
+To highlight - the qualitative conclusions for the following comparisons are not robust to big differences in amplification efficiency.
+
+```{r}
+summ_d17_8w %>% 
+  filter(!robust) %>%
+  group_by(genotypes) %>%
+  summarise(non_robust_comparisons = paste0(label_variant, collapse = ", ")) %>% table_format()
+```
+
+
+
+## Comparisons - linear forms
+
+```{r}
+comparisons_lin_d17_8w <- process_comparisons(comparisons_lin_raw, d17_8w_model)
+
+comparisons_lin_d17_8w_eff <-  comparisons_lin_d17_8w %>%
+  crossing(eff_variants) %>%
+  mutate(comparison_id = 1:n())
+```
+
+
+```{r}
+comparisons_lin_pred_d17_8w <- predict_comparisons(fit_d17_8w, d17_8w, comparisons_lin_d17_8w_eff, c("wt"), c("d17"))
+ratios_observed_d17_8w <- compute_ratios_observed(d17_8w_model, comparisons_lin_d17_8w)
+```
+
+
+```{r}
+plot_detailed_comparisons(comparisons_lin_d17_8w, comparisons_lin_pred_d17_8w, ratios_observed_d17_8w, n_to_show = 6)
+```
+
+
+```{r}
+plot_all_lin_d17_8w <- plot_all_comparisons(comparisons_lin_pred_d17_8w)
+plot_all_lin_d17_8w
+
+ggsave(here::here("local_temp_data/comparisons_lin_d17_8w.svg"), plot = plot_all_lin_d17_8w)
+```
+
+
+```{r}
+plot_comparisons_sensitivity(comparisons_lin_pred_d17_8w, ncol = 2)
+```
+
+```{r}
+summ_lin_d17_8w <- summarise_comparisons(comparisons_lin_pred_d17_8w)
+summ_lin_d17_8w
+
+min_decrease <- exp(-max(summ_lin_d17_8w$high))
+```
+
+All of the linear comparisons point downards, we can rule out less then `r min_decrease` fold decreasein expression relative to Gapdh.
 
 # N 4w
 
@@ -256,15 +413,109 @@ fit_N_4w
 ```
 
 ```{r}
-show_pp_checks(N_4w_model, fit_N_4w)
+if(pp_checks) {
+  show_pp_checks(N_4w_model, fit_N_4w)
+}
 ```
 
-## Comparisons
+## Comparisons - alternative forms
+
 
 ```{r}
-comparisons_pred_N_4w <- predict_comparisons(fit_N_4w, comparisons_eff)
-ratios_observed_N_4w <- compute_ratios_observed(N_4w_model, comparisons)
+comparisons_N_4w <- comparisons_raw %>% 
+  process_comparisons(data_model = N_4w_model)
+  
+
+comparisons_N_4w_eff <- comparisons_N_4w %>%
+  crossing(eff_variants) %>%
+  mutate(comparison_id = 1:n())
 ```
+
+
+```{r}
+comparisons_pred_N_4w <- predict_comparisons(fit_N_4w, N_4w, comparisons_N_4w_eff, c( "wt", "wt"), c("N", "het"))
+ratios_observed_N_4w <- compute_ratios_observed(N_4w_model, comparisons_N_4w)
+```
+
+
+
+
+```{r}
+plot_detailed_comparisons(comparisons_N_4w, comparisons_pred_N_4w, ratios_observed_N_4w)
+```
+
+
+```{r}
+plot_all_N_4w <-  plot_all_comparisons(comparisons_pred_N_4w)
+plot_all_N_4w
+ggsave(here::here("local_temp_data/comparisons_N_4w.svg"), plot = plot_all_N_4w)
+
+```
+
+```{r, fig.width=8, fig.height = 8}
+plot_comparisons_sensitivity(comparisons_pred_N_4w)
+```
+
+```{r}
+summ_N_4w <- summarise_comparisons(comparisons_pred_N_4w)
+summ_N_4w %>% table_format()
+```
+
+To highlight - the qualitative conclusions for the following comparisons are not robust to big differences in amplification efficiency.
+
+```{r}
+summ_N_4w %>% 
+  filter(!robust) %>%
+  group_by(genotypes) %>%
+  summarise(non_robust_comparisons = paste0(label_variant, collapse = ", ")) %>% table_format()
+```
+
+
+
+## Comparisons - linear forms
+
+```{r}
+comparisons_lin_N_4w <- process_comparisons(comparisons_lin_raw, N_4w_model)
+
+comparisons_lin_N_4w_eff <-  comparisons_lin_N_4w %>%
+  crossing(eff_variants) %>%
+  mutate(comparison_id = 1:n())
+```
+
+
+```{r}
+comparisons_lin_pred_N_4w <- predict_comparisons(fit_N_4w, N_4w, comparisons_lin_N_4w_eff, c("wt","wt"), c("N","het"))
+ratios_observed_N_4w <- compute_ratios_observed(N_4w_model, comparisons_lin_N_4w)
+```
+
+
+```{r}
+plot_detailed_comparisons(comparisons_lin_N_4w, comparisons_lin_pred_N_4w, ratios_observed_N_4w, n_to_show = 6)
+```
+
+
+```{r}
+plot_all_lin_N_4w <- plot_all_comparisons(comparisons_lin_pred_N_4w)
+plot_all_lin_N_4w
+
+ggsave(here::here("local_temp_data/comparisons_lin_N_4w.svg"), plot = plot_all_lin_N_4w)
+```
+
+
+```{r}
+plot_comparisons_sensitivity(comparisons_lin_pred_N_4w, ncol = 2)
+```
+
+```{r}
+summ_lin_N_4w <- summarise_comparisons(comparisons_lin_pred_N_4w)
+summ_lin_N_4w
+
+min_change <- exp(-min(summ_lin_N_4w$low))
+max_change <- exp(max(summ_lin_N_4w$high))
+```
+
+For all of the linear comparisons, we can rule out more then `r min_change` fold decrease
+and more than `r max_change` fold increase in expression relative to Gapdh.
 
 
 # N 12w
@@ -309,10 +560,103 @@ fit_N_12w
 ``` 
 
 ```{r}
-show_pp_checks(N_12w_model, fit_N_12w)
+if(pp_checks) {
+  show_pp_checks(N_12w_model, fit_N_12w)
+}
 ```
 
-## Comparisons
+## Comparisons - alternative forms
+
+
+```{r}
+comparisons_N_12w <- comparisons_raw %>% 
+  process_comparisons(data_model = N_12w_model)
+  
+
+comparisons_N_12w_eff <- comparisons_N_12w %>%
+  crossing(eff_variants) %>%
+  mutate(comparison_id = 1:n())
+```
+
+
+```{r}
+comparisons_pred_N_12w <- predict_comparisons(fit_N_12w, N_12w, comparisons_N_12w_eff, c( "wt", "wt"), c("N", "het"))
+ratios_observed_N_12w <- compute_ratios_observed(N_12w_model, comparisons_N_12w)
+```
+
+
+
+
+```{r}
+plot_detailed_comparisons(comparisons_N_12w, comparisons_pred_N_12w, ratios_observed_N_12w)
+```
+
+
+```{r}
+plot_all_N_12w <-  plot_all_comparisons(comparisons_pred_N_12w)
+plot_all_N_12w
+ggsave(here::here("local_temp_data/comparisons_N_12w.svg"), plot = plot_all_N_12w)
+
+```
+
+```{r, fig.width=8, fig.height = 8}
+plot_comparisons_sensitivity(comparisons_pred_N_12w)
+```
+
+```{r}
+summ_N_12w <- summarise_comparisons(comparisons_pred_N_12w)
+summ_N_12w %>% table_format()
+```
+
+To highlight - the qualitative conclusions for the following comparisons are not robust to big differences in amplification efficiency.
+
+```{r}
+summ_N_12w %>% 
+  filter(!robust) %>%
+  group_by(genotypes) %>%
+  summarise(non_robust_comparisons = paste0(label_variant, collapse = ", ")) %>% table_format()
+```
+
+
+
+## Comparisons - linear forms
+
+```{r}
+comparisons_lin_N_12w <- process_comparisons(comparisons_lin_raw, N_12w_model)
+
+comparisons_lin_N_12w_eff <-  comparisons_lin_N_12w %>%
+  crossing(eff_variants) %>%
+  mutate(comparison_id = 1:n())
+```
+
+
+```{r}
+comparisons_lin_pred_N_12w <- predict_comparisons(fit_N_12w, N_12w, comparisons_lin_N_12w_eff, c("wt", "wt"), c("N", "het"))
+ratios_observed_N_12w <- compute_ratios_observed(N_12w_model, comparisons_lin_N_12w)
+```
+
+
+```{r}
+plot_detailed_comparisons(comparisons_lin_N_12w, comparisons_lin_pred_N_12w, ratios_observed_N_12w, n_to_show = 6)
+```
+
+
+```{r}
+plot_all_lin_N_12w <- plot_all_comparisons(comparisons_lin_pred_N_12w)
+plot_all_lin_N_12w
+
+ggsave(here::here("local_temp_data/comparisons_lin_N_12w.svg"), plot = plot_all_lin_N_12w)
+```
+
+
+```{r}
+plot_comparisons_sensitivity(comparisons_lin_pred_N_12w, ncol = 2)
+```
+
+```{r}
+summ_lin_N_12w <- summarise_comparisons(comparisons_lin_pred_N_12w)
+summ_lin_N_12w
+```
 
 # Mathematical model
 

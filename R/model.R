@@ -54,11 +54,28 @@ show_pp_checks <- function(data_model, fit) {
 }
 
 
-predict_comparisons <- function(fit, comparisons_eff, genotype1, genotype2) {
+predict_comparisons <- function(fit, data, comparisons_eff, genotypes1, genotypes2) {
+  res_list <- list()
+  if(length(genotypes1) != length(genotypes2)) {
+    stop("Length must match")
+  }
+  for(i in 1:length(genotypes1)) {
+    res_list[[i]] <- predict_comparisons_genotype(fit, data, comparisons_eff, genotypes1[i], genotypes2[i])
+    res_list[[i]]$genotypes = paste0(genotypes2[i], "/", genotypes1[i])
+  }
 
+  do.call(rbind, res_list)
 }
 
-predict_comparisons_genotype <- function(fit, comparisons_eff, genotype1, genotype2) {
+predict_comparisons_genotype <- function(fit, data, comparisons_eff, genotype1, genotype2) {
+  primers_present_1 <- unique(dplyr::filter(data, genotype == genotype1)$primer_short)
+  primers_present_2 <- unique(dplyr::filter(data, genotype == genotype2)$primer_short)
+  primers_both <- intersect(primers_present_1, primers_present_2)
+
+  comparisons_eff <- dplyr::filter(comparisons_eff,
+                                   numerator %in% primers_both,
+                                   denominator %in% primers_both)
+
   pred_data_numerator_1 <- data.frame(primer_short = comparisons_eff$numerator,
                                        genotype = genotype1,
                                        sex = "F"
@@ -131,4 +148,25 @@ compute_comparisons_obs <- function(data_model, comparisons_eff, genotype_1, gen
            sem_ratio = log(eff_numerator) * (numerator_sem_Cq_1 + numerator_sem_Cq_2) -  log(eff_denominator) * (denominator_sem_Cq_1 + denominator_sem_Cq_2))
 
   comparisons_obs
+}
+
+
+summarise_comparisons <- function(comparisons_pred) {
+  res <- comparisons_pred
+  res <- dplyr::group_by(res, label_variant, genotypes, eff_label)
+  res <- dplyr::summarise(res, low = quantile(log_ratio, prob = 0.025),
+                          high = quantile(log_ratio, prob = 0.975),
+                          sign = case_when(low > 0 ~ "+",
+                                           high < 0 ~ "-",
+                                           TRUE ~ "0"),
+                          .groups = "drop_last")
+
+  res <- dplyr::summarise(res,
+                          robust = length(unique(sign)) == 1,
+                          low = low[eff_label == "Neutral"],
+                          high = high[eff_label == "Neutral"],
+                          sign = sign[eff_label == "Neutral"]
+                          )
+
+  res
 }
