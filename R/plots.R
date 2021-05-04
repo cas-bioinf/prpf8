@@ -24,7 +24,11 @@ genes_parcoord <- function(data, primers) {
 
 comparison_label_theme <- theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.3), axis.title.x = element_blank())
 
-scale_color_type <- scale_color_brewer(type = "qual")
+scale_color_genotype_compare <-
+  scale_color_manual("Genotypes", values = c("N/wt" = "#39B54A", "d17/wt" = "#1B9BD7",
+                                "het/wt" = "#808285"))
+scale_shape_genotype_compare <- scale_shape_manual("Genotypes", values = c(16, 3))
+zero_line <- geom_hline(yintercept = 1, color =  "#FC814A")
 
 plot_detailed_comparisons <- function(comparisons, comparisons_pred, ratios_observed, n_to_show = 4) {
 
@@ -53,11 +57,11 @@ plot_detailed_comparisons <- function(comparisons, comparisons_pred, ratios_obse
     plot_pred <- comparisons_pred %>%
       filter(label_variant %in% comparisons_to_show, eff_label == "Neutral") %>%
       ggplot(aes(x = label_variant, y = exp(log_ratio), color = genotypes, shape = genotypes)) +
-      geom_hline(yintercept = 1, color = "blue") +
+      zero_line +
       expand_limits(y = c(0.5, 2)) +
       stat_pointinterval(position = position_dodge(width = 0.5)) +
-      scale_color_type +
-      scale_y_log10("ratio of ratios") + comparison_label_theme
+      scale_color_genotype_compare + scale_shape_genotype_compare +
+      scale_y_log10("Ratio of ratios") + comparison_label_theme
 
     plot_observed <- ratios_observed %>%
       filter(label_variant %in% comparisons_to_show) %>%
@@ -72,10 +76,11 @@ plot_all_comparisons <- function(comparisons_pred, expand = c(0.5,2)) {
   comparisons_pred %>%
     filter(eff_label == "Neutral") %>%
     ggplot(aes(x = label_variant, y = exp(log_ratio), color = genotypes, shape = genotypes)) +
-    geom_hline(yintercept = 1, color = "blue") +
+    zero_line +
     stat_pointinterval(position = position_dodge(width = 0.4)) +
     expand_limits(y = expand) +
-    scale_y_log10("ratio of ratios") + scale_color_type +
+    scale_y_log10("Ratio of ratios") +
+    scale_color_genotype_compare + scale_shape_genotype_compare +
     comparison_label_theme
 }
 
@@ -83,10 +88,11 @@ plot_all_comparisons <- function(comparisons_pred, expand = c(0.5,2)) {
 plot_comparisons_sensitivity <- function(comparisons_pred, ncol = 1, expand = c(0.5,2)) {
   comparisons_pred %>%
     ggplot(aes(x = label_variant, y = exp(log_ratio), color = eff_label)) +
-    geom_hline(yintercept = 1, color = "blue") +
+    zero_line +
     stat_pointinterval(position = position_dodge(width = 0.5)) +
     expand_limits(y = expand) +
-    scale_y_log10("ratio of ratios") + scale_color_type +
+    scale_y_log10("Ratio of ratios") +
+    scale_color_manual("Efficiency", values = c("Neutral" = "#808285", "Favor denom" = "#39B54A", "Favor num" = "#1B9BD7")) +
     facet_wrap(~genotypes, ncol = ncol, scales = "free_x") +
     comparison_label_theme
 }

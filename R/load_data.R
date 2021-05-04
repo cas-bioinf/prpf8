@@ -91,6 +91,12 @@ read_qpcr <- function(file, sheet, range, mutation = "d17") {
   qpcr_long
 }
 
+compute_label_variant <- function(comparisons) {
+  comparisons %>%
+    group_by(label) %>%
+    mutate(label_variant = if_else(rep(length(unique(variant)) > 1, n()), paste0(label, " - ", variant), label)) %>%
+    ungroup()
+}
 
 process_comparisons <- function(comparisons, data_model) {
   comparisons <- dplyr::mutate(comparisons,
@@ -120,11 +126,9 @@ process_comparisons <- function(comparisons, data_model) {
             paste0(no_data_comp, collapse ="\n\t"))
   }
 
-  comparisons <- comparisons %>%
-    dplyr::filter(has_data) %>%
-    group_by(label) %>%
-    mutate(label_variant = if_else(rep(n() > 1, n()), paste0(label, " - ", variant), label)) %>%
-    ungroup()
+  comparisons <- dplyr::filter(comparisons, has_data)
+
+  comparisons <- compute_label_variant(comparisons)
 
   comparisons <- comparisons %>%
     mutate(denominator = factor(denominator, levels = levels(data_model$primer_short)),

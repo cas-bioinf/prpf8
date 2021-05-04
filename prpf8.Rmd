@@ -32,8 +32,10 @@ if(document_output) {
 }
 
 housekeeping <- c("Ubb", "Gapdh", "Actb") 
-pp_checks <- FALSE
+pp_checks <- FALSE # Uncomment this to show all the pp checks
 ```
+
+For each of the genotype-timepoint combinations we will follow the same structure: show exploratory plots, then summary of the fitted model and finally look at comparisons. The details will be explained for the d17 - 4w case and the explanation not repeated for the additional cases.
 
 # d17 4w
 
@@ -49,8 +51,6 @@ a4 <- read_qpcr(f, "qPCR set a4", range = "A5:AC56")
 
 d17_4w <- rbind(a1, a2, a3, a4)
 ```
-
-## Exploratory plots
 
 
 ```{r d17-4w-box-housekeeping, fig.cap = "Cq values of the housekeeping genes stratified by genotype and sex. Each dot is a single technical replicate."}
@@ -130,7 +130,7 @@ comparisons_d17_4w %>% select(label, variant, numerator, denominator) %>% table_
 
 
 ```{r}
-comparisons_pred_d17_4w <- predict_comparisons(fit_d17_4w, d17_4w, comparisons_d17_4w_eff, c("wt", "wt"), c( "het", "d17"))
+comparisons_pred_d17_4w <- predict_comparisons(fit_d17_4w, d17_4w, comparisons_d17_4w_eff, c("wt", "wt"), c("d17", "het"))
 ratios_observed_d17_4w <- compute_ratios_observed(d17_4w_model, comparisons_d17_4w)
 ```
 
@@ -146,8 +146,19 @@ plot_detailed_comparisons(comparisons_d17_4w, comparisons_pred_d17_4w, ratios_ob
 ```
 
 
-```{r}
-plot_all_d17_4w <-  plot_all_comparisons(comparisons_pred_d17_4w)
+```{r, fig.cap = "Ratio of product ratios between genotypes derived from the linear mixed model. Ratio of each product (horizontal axis) to a corresponding canonical product is computed for each genotype and the ratio of those ratios is treated as the estimand of interest (vertical axis, log scale). We show posterior credible intervals (95% - thin, 50% - thick) and means (points). Here ratio of ratios > 1 means that the mutant mice have larger proportion of circular/alternative products than the wt mice. The model assumes equal transcription efficiency of both product and accounts for various sources of biological (animal, litter, sex) and technical (replicate, run) variation."}
+label_variant_ord_fun <- function(x) {
+  unique(-10 * grepl("^(Chd7|Rbfox1|Zfp521)", x) + grepl("^Gapdh", x))
+}
+
+plot_all_d17_4w <- comparisons_pred_d17_4w %>%
+  filter(variant == 1 | label == "Rims2 circ 595",
+         !grepl("^Cnksr3", label)) %>%
+  compute_label_variant() %>%
+  mutate(label_variant = fct_reorder(label_variant, .x = label_variant, 
+                                     .fun = label_variant_ord_fun)) %>%
+  plot_all_comparisons()
+  
 plot_all_d17_4w
 ggsave(here::here("local_temp_data/comparisons_d17_4w.svg"), plot = plot_all_d17_4w)
 
@@ -159,6 +170,8 @@ Computing the ratio of ratios requires us to guess a value for PCR efficiency. I
 ```{r, fig.width=8, fig.height = 8}
 plot_comparisons_sensitivity(comparisons_pred_d17_4w)
 ```
+
+The figure is summarized also in the following table - `low` and `high` are the bounds of the 95% posterior credible intervals, `sign` is the main direction of the effect and `robust` indicates whether the sign would change assuming different efficiency.
 
 ```{r}
 summ_d17_4w <- summarise_comparisons(comparisons_pred_d17_4w)
@@ -196,7 +209,7 @@ comparisons_lin_d17_4w %>% select(label, variant, numerator, denominator) %>% ta
 
 ```
 ```{r}
-comparisons_lin_pred_d17_4w <- predict_comparisons(fit_d17_4w, d17_4w, comparisons_lin_d17_4w_eff, c("wt", "wt"), c( "het", "d17"))
+comparisons_lin_pred_d17_4w <- predict_comparisons(fit_d17_4w, d17_4w, comparisons_lin_d17_4w_eff, c("wt", "wt"), c( "d17", "het"))
 ratios_observed_d17_4w <- compute_ratios_observed(d17_4w_model, comparisons_lin_d17_4w)
 ```
 
@@ -206,11 +219,8 @@ plot_detailed_comparisons(comparisons_lin_d17_4w, comparisons_lin_pred_d17_4w, r
 ```
 
 
-```{r}
-plot_all_lin_d17_4w <- plot_all_comparisons(comparisons_lin_pred_d17_4w)
-plot_all_lin_d17_4w
-
-ggsave(here::here("local_temp_data/comparisons_lin_d17_4w.svg"), plot = plot_all_lin_d17_4w)
+```{r, fig.cap = "Ratio of product ratios between genotypes derived from the linear mixed model. Ratio of each product to Gapdh (horizontal axis) is computed for each genotype and the ratio of those ratios is treated as the estimand of interest (vertical axis, log scale). We show posterior credible intervals (95% - thin, 50% - thick) and means (points). Here ratio of ratios > 1 means that the mutant mice have larger proportion of the product than the wt mice. The model assumes equal transcription efficiency of both products and accounts for various sources of biological (animal, litter, sex) and technical (replicate, run) variation."}
+plot_all_comparisons(comparisons_lin_pred_d17_4w)
 ```
 
 
@@ -304,7 +314,13 @@ plot_detailed_comparisons(comparisons_d17_8w, comparisons_pred_d17_8w, ratios_ob
 
 
 ```{r}
-plot_all_d17_8w <-  plot_all_comparisons(comparisons_pred_d17_8w)
+plot_all_d17_8w <-  comparisons_pred_d17_8w %>%     
+  filter(variant == 1, !grepl("^Cnksr3", label)) %>%
+  compute_label_variant() %>%
+  mutate(label_variant = fct_reorder(label_variant, .x = label_variant, 
+                                     .fun = label_variant_ord_fun)) %>%
+  plot_all_comparisons()
+
 plot_all_d17_8w
 ggsave(here::here("local_temp_data/comparisons_d17_8w.svg"), plot = plot_all_d17_8w)
 
@@ -353,10 +369,15 @@ plot_detailed_comparisons(comparisons_lin_d17_8w, comparisons_lin_pred_d17_8w, r
 
 
 ```{r}
-plot_all_lin_d17_8w <- plot_all_comparisons(comparisons_lin_pred_d17_8w)
-plot_all_lin_d17_8w
 
-ggsave(here::here("local_temp_data/comparisons_lin_d17_8w.svg"), plot = plot_all_lin_d17_8w)
+
+plot_all_lin_d17 <- rbind(comparisons_lin_pred_d17_4w %>% mutate(time = "4 weeks"),
+      comparisons_lin_pred_d17_8w %>% mutate(time = "8 weeks")) %>% 
+  plot_all_comparisons() + facet_wrap(~time)
+
+plot_all_lin_d17
+
+ggsave(here::here("local_temp_data/comparisons_lin_d17.svg"), plot = plot_all_lin_d17)
 ```
 
 
@@ -446,7 +467,13 @@ plot_detailed_comparisons(comparisons_N_4w, comparisons_pred_N_4w, ratios_observ
 
 
 ```{r}
-plot_all_N_4w <-  plot_all_comparisons(comparisons_pred_N_4w)
+plot_all_N_4w <-  comparisons_pred_N_4w   %>%
+  filter(variant == 1, !grepl("^Cnksr3", label)) %>%
+  compute_label_variant() %>%
+  mutate(label_variant = fct_reorder(label_variant, .x = label_variant, 
+                                     .fun = label_variant_ord_fun)) %>%
+  plot_all_comparisons()
+
 plot_all_N_4w
 ggsave(here::here("local_temp_data/comparisons_N_4w.svg"), plot = plot_all_N_4w)
 
@@ -495,10 +522,7 @@ plot_detailed_comparisons(comparisons_lin_N_4w, comparisons_lin_pred_N_4w, ratio
 
 
 ```{r}
-plot_all_lin_N_4w <- plot_all_comparisons(comparisons_lin_pred_N_4w)
-plot_all_lin_N_4w
-
-ggsave(here::here("local_temp_data/comparisons_lin_N_4w.svg"), plot = plot_all_lin_N_4w)
+plot_all_comparisons(comparisons_lin_pred_N_4w)
 ```
 
 
@@ -593,7 +617,13 @@ plot_detailed_comparisons(comparisons_N_12w, comparisons_pred_N_12w, ratios_obse
 
 
 ```{r}
-plot_all_N_12w <-  plot_all_comparisons(comparisons_pred_N_12w)
+plot_all_N_12w <-  comparisons_pred_N_12w %>% 
+  filter(variant == 1, !grepl("^Cnksr3", label)) %>%
+  compute_label_variant() %>%
+  mutate(label_variant = fct_reorder(label_variant, .x = label_variant, 
+                                     .fun = label_variant_ord_fun)) %>%
+  plot_all_comparisons()
+
 plot_all_N_12w
 ggsave(here::here("local_temp_data/comparisons_N_12w.svg"), plot = plot_all_N_12w)
 
@@ -642,10 +672,15 @@ plot_detailed_comparisons(comparisons_lin_N_12w, comparisons_lin_pred_N_12w, rat
 
 
 ```{r}
-plot_all_lin_N_12w <- plot_all_comparisons(comparisons_lin_pred_N_12w)
-plot_all_lin_N_12w
 
-ggsave(here::here("local_temp_data/comparisons_lin_N_12w.svg"), plot = plot_all_lin_N_12w)
+plot_all_lin_N <- rbind(comparisons_lin_pred_N_4w %>% mutate(time = "4 weeks"),
+      comparisons_lin_pred_N_12w %>% mutate(time = "12 weeks")) %>% 
+  mutate(time = factor(time, levels = c("4 weeks", "12 weeks"))) %>%
+  plot_all_comparisons() + facet_wrap(~time)
+
+plot_all_lin_N
+
+ggsave(here::here("local_temp_data/comparisons_lin_N.svg"), plot = plot_all_lin_N)
 ```
 
 

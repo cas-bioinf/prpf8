@@ -59,9 +59,10 @@ predict_comparisons <- function(fit, data, comparisons_eff, genotypes1, genotype
   if(length(genotypes1) != length(genotypes2)) {
     stop("Length must match")
   }
+  all_genotypes <- paste0(genotypes2, "/", genotypes1)
   for(i in 1:length(genotypes1)) {
     res_list[[i]] <- predict_comparisons_genotype(fit, data, comparisons_eff, genotypes1[i], genotypes2[i])
-    res_list[[i]]$genotypes = paste0(genotypes2[i], "/", genotypes1[i])
+    res_list[[i]]$genotypes = factor(all_genotypes[i], levels = all_genotypes)
   }
 
   do.call(rbind, res_list)
