@@ -72,14 +72,14 @@ plot_detailed_comparisons <- function(comparisons, comparisons_pred, ratios_obse
   }
 }
 
-plot_all_comparisons <- function(comparisons_pred, expand = c(0.5,2)) {
+plot_all_comparisons <- function(comparisons_pred, expand = c(0.5,2), breaks = waiver()) {
   comparisons_pred %>%
     filter(eff_label == "Neutral") %>%
     ggplot(aes(x = label_variant, y = exp(log_ratio), color = genotypes, shape = genotypes)) +
     zero_line +
     stat_pointinterval(position = position_dodge(width = 0.4)) +
     expand_limits(y = expand) +
-    scale_y_log10("Ratio of ratios") +
+    scale_y_log10("Ratio of ratios", breaks = breaks) +
     scale_color_genotype_compare + scale_shape_genotype_compare +
     comparison_label_theme
 }

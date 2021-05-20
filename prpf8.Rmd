@@ -192,12 +192,24 @@ summ_d17_4w %>%
 ## Comparisons - linear forms
 
 ```{r}
+
+lin_label_variant_ord_fun <- function(x) {
+  res <- grepl("^Ntm", as.character(unique(x)))
+  as.numeric(res)
+}
+
+
+
 comparisons_lin_raw <- tibble::tribble(
   ~label,           ~denominator, ~numerator_1, ~numerator_2,
+  "Chd7/Gapdh",    "Gapdh",   "MR523/524", "MR526/527",
   "Rbfox1/Gapdh",  "Gapdh",   "MR513/514", "MR515/516", 
   "Zfp521/Gapdh",  "Gapdh",   "MR518/519", "MR520/521",
-  "Chd7/Gapdh",    "Gapdh",   "MR523/524", "MR526/527"
+  "Ntm circ./Gapdh",     "Gapdh",   "MR494/495", NA,
+  "Ntm lin./Gapdh","Gapdh",   "MR492/493", NA,
 ) 
+  
+  
 
 comparisons_lin_d17_4w <- process_comparisons(comparisons_lin_raw, d17_4w_model)
 
@@ -209,13 +221,17 @@ comparisons_lin_d17_4w %>% select(label, variant, numerator, denominator) %>% ta
 
 ```
 ```{r}
-comparisons_lin_pred_d17_4w <- predict_comparisons(fit_d17_4w, d17_4w, comparisons_lin_d17_4w_eff, c("wt", "wt"), c( "d17", "het"))
+comparisons_lin_pred_d17_4w <- predict_comparisons(fit_d17_4w, d17_4w, comparisons_lin_d17_4w_eff, c("wt", "wt"), c( "d17", "het")) 
+
+comparisons_lin_pred_d17_4w$label_variant <- fct_reorder(.f = comparisons_lin_pred_d17_4w$label_variant, .x = comparisons_lin_pred_d17_4w$label_variant, 
+                                     .fun = lin_label_variant_ord_fun)
+
 ratios_observed_d17_4w <- compute_ratios_observed(d17_4w_model, comparisons_lin_d17_4w)
 ```
 
 
 ```{r}
-plot_detailed_comparisons(comparisons_lin_d17_4w, comparisons_lin_pred_d17_4w, ratios_observed_d17_4w, n_to_show = 6)
+plot_detailed_comparisons(comparisons_lin_d17_4w, comparisons_lin_pred_d17_4w, ratios_observed_d17_4w, n_to_show = 4)
 ```
 
 
@@ -232,10 +248,12 @@ plot_comparisons_sensitivity(comparisons_lin_pred_d17_4w, ncol = 2)
 summ_lin_d17_4w <- summarise_comparisons(comparisons_lin_pred_d17_4w)
 summ_lin_d17_4w
 
-min_change <- exp(-min(summ_lin_d17_4w$low))
-max_change <- exp(max(summ_lin_d17_4w$high))
+to_include <- summ_lin_d17_4w$label_variant != "Ntm circ./Gapdh"
+
+min_change <- exp(-min(summ_lin_d17_4w$low[to_include]))
+max_change <- exp(max(summ_lin_d17_4w$high[to_include]))
 ```
-For all of the linear comparisons, we can rule out more then `r min_change` fold decrease
+For all of the linear comparisons (except Ntm circ.), we can rule out more then `r min_change` fold decrease
 and more than `r max_change` fold increase in expression relative to Gapdh.
 
 # d17 8w
@@ -359,12 +377,17 @@ comparisons_lin_d17_8w_eff <-  comparisons_lin_d17_8w %>%
 
 ```{r}
 comparisons_lin_pred_d17_8w <- predict_comparisons(fit_d17_8w, d17_8w, comparisons_lin_d17_8w_eff, c("wt"), c("d17"))
+
+comparisons_lin_pred_d17_8w$label_variant <- fct_reorder(.f = comparisons_lin_pred_d17_8w$label_variant, .x = comparisons_lin_pred_d17_8w$label_variant, 
+                                     .fun = lin_label_variant_ord_fun)
+
+
 ratios_observed_d17_8w <- compute_ratios_observed(d17_8w_model, comparisons_lin_d17_8w)
 ```
 
 
 ```{r}
-plot_detailed_comparisons(comparisons_lin_d17_8w, comparisons_lin_pred_d17_8w, ratios_observed_d17_8w, n_to_show = 6)
+plot_detailed_comparisons(comparisons_lin_d17_8w, comparisons_lin_pred_d17_8w, ratios_observed_d17_8w, n_to_show = 4)
 ```
 
 
@@ -373,7 +396,7 @@ plot_detailed_comparisons(comparisons_lin_d17_8w, comparisons_lin_pred_d17_8w, r
 
 plot_all_lin_d17 <- rbind(comparisons_lin_pred_d17_4w %>% mutate(time = "4 weeks"),
       comparisons_lin_pred_d17_8w %>% mutate(time = "8 weeks")) %>% 
-  plot_all_comparisons() + facet_wrap(~time)
+  plot_all_comparisons(expand = c(0.1,2), breaks = c(0.1,0.25,0.5,1,2)) + facet_wrap(~time)
 
 plot_all_lin_d17
 
@@ -389,10 +412,10 @@ plot_comparisons_sensitivity(comparisons_lin_pred_d17_8w, ncol = 2)
 summ_lin_d17_8w <- summarise_comparisons(comparisons_lin_pred_d17_8w)
 summ_lin_d17_8w
 
-min_decrease <- exp(-max(summ_lin_d17_8w$high))
+min_decrease <- exp(-max(summ_lin_d17_8w$high[summ_lin_d17_8w$label_variant != "Ntm lin./Gapdh"]))
 ```
 
-All of the linear comparisons point downards, we can rule out less then `r min_decrease` fold decreasein expression relative to Gapdh.
+All of the linear comparisons except for Ntm linear point downards and for those, we can rule out less then `r min_decrease` fold decrease in expression relative to Gapdh.
 
 # N 4w
 
@@ -512,12 +535,17 @@ comparisons_lin_N_4w_eff <-  comparisons_lin_N_4w %>%
 
 ```{r}
 comparisons_lin_pred_N_4w <- predict_comparisons(fit_N_4w, N_4w, comparisons_lin_N_4w_eff, c("wt","wt"), c("N","het"))
+
+comparisons_lin_pred_N_4w$label_variant <- fct_reorder(.f = comparisons_lin_pred_N_4w$label_variant, .x = comparisons_lin_pred_N_4w$label_variant, 
+                                     .fun = lin_label_variant_ord_fun)
+
+
 ratios_observed_N_4w <- compute_ratios_observed(N_4w_model, comparisons_lin_N_4w)
 ```
 
 
 ```{r}
-plot_detailed_comparisons(comparisons_lin_N_4w, comparisons_lin_pred_N_4w, ratios_observed_N_4w, n_to_show = 6)
+plot_detailed_comparisons(comparisons_lin_N_4w, comparisons_lin_pred_N_4w, ratios_observed_N_4w, n_to_show = 4)
 ```
 
 
@@ -534,11 +562,14 @@ plot_comparisons_sensitivity(comparisons_lin_pred_N_4w, ncol = 2)
 summ_lin_N_4w <- summarise_comparisons(comparisons_lin_pred_N_4w)
 summ_lin_N_4w
 
-min_change <- exp(-min(summ_lin_N_4w$low))
-max_change <- exp(max(summ_lin_N_4w$high))
+to_include <- summ_lin_N_4w$label_variant != "Ntm circ./Gapdh"
+
+
+min_change <- exp(-min(summ_lin_N_4w$low[to_include]))
+max_change <- exp(max(summ_lin_N_4w$high[to_include]))
 ```
 
-For all of the linear comparisons, we can rule out more then `r min_change` fold decrease
+For all of the linear comparisons (not including Ntm circ), we can rule out more then `r min_change` fold decrease
 and more than `r max_change` fold increase in expression relative to Gapdh.
 
 
@@ -662,12 +693,17 @@ comparisons_lin_N_12w_eff <-  comparisons_lin_N_12w %>%
 
 ```{r}
 comparisons_lin_pred_N_12w <- predict_comparisons(fit_N_12w, N_12w, comparisons_lin_N_12w_eff, c("wt", "wt"), c("N", "het"))
+
+comparisons_lin_pred_N_12w$label_variant <- fct_reorder(.f = comparisons_lin_pred_N_12w$label_variant, .x = comparisons_lin_pred_N_12w$label_variant, 
+                                     .fun = lin_label_variant_ord_fun)
+
+
 ratios_observed_N_12w <- compute_ratios_observed(N_12w_model, comparisons_lin_N_12w)
 ```
 
 
 ```{r}
-plot_detailed_comparisons(comparisons_lin_N_12w, comparisons_lin_pred_N_12w, ratios_observed_N_12w, n_to_show = 6)
+plot_detailed_comparisons(comparisons_lin_N_12w, comparisons_lin_pred_N_12w, ratios_observed_N_12w, n_to_show = 4)
 ```
 
 
@@ -676,7 +712,7 @@ plot_detailed_comparisons(comparisons_lin_N_12w, comparisons_lin_pred_N_12w, rat
 plot_all_lin_N <- rbind(comparisons_lin_pred_N_4w %>% mutate(time = "4 weeks"),
       comparisons_lin_pred_N_12w %>% mutate(time = "12 weeks")) %>% 
   mutate(time = factor(time, levels = c("4 weeks", "12 weeks"))) %>%
-  plot_all_comparisons() + facet_wrap(~time)
+  plot_all_comparisons(expand = c(0.1,2), breaks = c(0.1,0.25,0.5,1,2)) + facet_wrap(~time)
 
 plot_all_lin_N
 
